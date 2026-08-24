@@ -1,10 +1,12 @@
-# Research Agent Lite v1.0
+# Research Assistant · evolving project
 
-This is the runnable project produced by the eight Python lessons in the ELI5 AI Agent Engineering course.
+This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-It is intentionally small and offline-first: the default paper sources are local demo adapters, so you can run the full architecture without an API key. In the next course stage, those adapters can be replaced with real LLM/search clients.
+The eight Python lessons closed at **Research Agent Lite v1.0**. The LLM Application Engineering track now upgrades the same codebase toward **Research Assistant v2.0** instead of starting a new demo.
 
-## What it demonstrates
+Current project level: **v1.4**.
+
+## What Python v1.0 demonstrates
 
 - Pydantic request/response models
 - modules and package boundaries
@@ -14,6 +16,15 @@ It is intentionally small and offline-first: the default paper sources are local
 - dataclass state
 - composition / dependency injection
 - pytest unit and integration-style tests
+
+## LLM track increments already landed
+
+- **v1.1** — model API / provider boundary concepts
+- **v1.2** — conversation state and history strategy
+- **v1.3** — `ContextBuilder`, token-budget-aware selection, injectable token estimator
+- **v1.4** — semantic `GenerationProfile` objects for extract / research / brainstorm tasks
+
+The project remains offline-first for now: no API key is required. Real provider adapters arrive later in the LLM track so the architecture can be learned and tested before credentials and network variability are introduced.
 
 ## Run
 
@@ -30,18 +41,25 @@ pytest -q
 
 ```text
 app/
-├── models.py    # validated boundary models
-├── state.py     # internal AgentState dataclass
-├── errors.py    # error taxonomy
-├── sources.py   # PaperSource protocol + demo adapters
-├── agent.py     # orchestration, concurrency, retry, partial result
-└── main.py      # CLI entrypoint
+├── models.py       # validated boundary models
+├── state.py        # internal AgentState dataclass
+├── errors.py       # error taxonomy
+├── sources.py      # PaperSource protocol + demo adapters
+├── agent.py        # orchestration, concurrency, retry, partial result
+├── context.py      # v1.3 context selection + token budgeting
+├── generation.py   # v1.4 provider-neutral generation profiles
+└── main.py         # CLI entrypoint
 
 tests/
 ├── test_state.py
-└── test_agent.py
+├── test_agent.py
+└── test_context_generation.py
 ```
+
+## Why the new modules are provider-neutral
+
+`ContextBuilder` accepts an injected token estimator because exact tokenization depends on the target model. `GenerationProfile` stores semantic intent (`low/high reasoning`, `low/high randomness`) rather than pretending every provider exposes identical parameter names.
 
 ## Next step
 
-Replace `DemoPaperSource` with real adapters while keeping the same `PaperSource` interface. The rest of the agent should not need to know whether a source is local, HTTP-based, or LLM-backed.
+LLM 05–06 will add streaming and structured outputs. After that, a real provider adapter can map these provider-neutral concepts onto the model capabilities actually supported by that provider.
