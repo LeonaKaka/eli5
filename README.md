@@ -2,54 +2,38 @@
 
 Public static learning site for AI Agent engineering, built as an interactive ELI5 course rather than a glossary.
 
-## Current tracks
+## Completed core tracks
 
-### Python — 8/8 complete
-Data / contracts / project structure / HTTP / async / failure engineering / state / testing.
+- **Python — 8/8**: data / contracts / project structure / HTTP / async / failure engineering / state / testing.
+- **LLM Application Engineering — 10/10**: API lifecycle → context → generation → streaming → structured output → tools → files → routing → evals/safety.
+- **RAG Engineering — 10/10**: parsing → chunking → embeddings → ANN/HNSW → BM25/hybrid → rerank → query planning → citation → retrieval/end-to-end eval.
+- **Agent Engineering — 10/10**: loop → state/budgets → planning → memory → tools → approval → durability → multi-agent → trajectory eval → production control plane.
+- **LangChain / LangGraph — 10/10**: StateGraph → ToolNode → Command/Send → persistence → interrupt → Store → subgraphs → middleware/streaming → production runtime boundaries.
+- **FastAPI — 10/10**: Run API → contracts → async/Worker → SSE → idempotent commands → auth/security → errors → testing → lifespan/health → production API architecture.
 
-### LLM Application Engineering — 10/10 complete
-API lifecycle → conversation state → context → generation → streaming → structured output → tool calling → multimodal/files → routing/reliability → evals/safety.
+Roadmaps: `docs/llm-app-roadmap.md`, `docs/rag-roadmap.md`, `docs/agent-roadmap.md`, `docs/langchain-langgraph-roadmap.md`, `docs/fastapi-roadmap.md`.
 
-Full scope: `docs/llm-app-roadmap.md`.
+## Advanced track — MCP / Tool Ecosystem — 2/10 live
 
-### RAG Engineering — 10/10 complete
-Document parsing → chunking → embeddings → ANN/HNSW → BM25/hybrid → reranking → query planning → evidence/citation → retrieval eval → end-to-end RAG eval.
+- 01 Host / Client / Server / Tools / Resources / Prompts / control ownership ✅
+- 02 Python SDK v2 `MCPServer` + first-class `Client` / real discovery/call/read/get ✅
+- 03 stdio / Streamable HTTP / 2026 stateless MCP
+- 04 tool contracts / structured results / errors / progress
+- 05 resources / templates / cache / subscriptions
+- 06 prompts / completions / user workflows
+- 07 multi-server discovery / namespacing / routing
+- 08 OAuth / authorization / trust
+- 09 MCP ↔ LangGraph / gateway / observability
+- 10 production MCP ecosystem / Tasks / extensions
 
-Full scope: `docs/rag-roadmap.md`.
-
-### Agent Engineering — 10/10 complete
-Agent loop → state/budgets → planning → memory → tool orchestration → approval → durable execution → multi-agent handoff → trajectory eval → production run architecture.
-
-Full scope: `docs/agent-roadmap.md`.
-
-### LangChain / LangGraph — 10/10 complete
-StateGraph → ToolNode → Command/Send → persistence → interrupt/resume → Store → subgraphs/handoffs → middleware/streaming → production runtime boundaries.
-
-Full scope: `docs/langchain-langgraph-roadmap.md`.
-
-### FastAPI — 10/10 complete
-- 01 API boundary / Run resources / OpenAPI ✅
-- 02 Pydantic contracts / dependencies / response filtering ✅
-- 03 async boundary / blocking SDK / durable Worker separation ✅
-- 04 native SSE / reconnect / retention / safe projection ✅
-- 05 approval / cancel / ETag / `If-Match` / `Idempotency-Key` ✅
-- 06 Bearer / Principal permissions / tenant scope / CORS / proxy trust ✅
-- 07 ProblemDetails / exception handlers / request correlation / safe 500s ✅
-- 08 TestClient / dependency overrides / integration vs unit / OpenAPI contract ✅
-- 09 Lifespan / resource ownership / liveness / readiness ✅
-- 10 Production Agent API composition / deployment profile audit ✅
-
-Full scope: `docs/fastapi-roadmap.md`.
-
-### Docker / Deployment — next
-Containerize the v6.0 API and Worker separately, externalize process-local durable adapters, wire service networking/config/secrets/volumes, and validate restart/multi-replica behavior.
+Full scope: `docs/mcp-roadmap.md`.
 
 ## Teaching contract
-Every lesson must include a concrete engineering problem, visual/explorable explanation, code evolution, at least one failure case, a continuous project increment, and interview-level checks.
+Every lesson begins with a concrete engineering problem and includes visual/explorable mechanism, code evolution, deliberate failure cases, one continuous Research Assistant project increment, and interview-level checks.
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, LangChain / LangGraph at v5.0, and FastAPI closes the backend architecture at **Research Assistant v6.0**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent at v4.0, LangGraph at v5.0, FastAPI at v6.0, and MCP now evolves it at **Research Assistant v6.2**.
 
 ```bash
 cd projects/research-agent-lite
@@ -60,26 +44,22 @@ pytest -q
 uvicorn app.fastapi_app:app --reload
 ```
 
-Current framework/service dependencies follow the course reference lines: `langchain>=1.3,<2`, `langgraph>=1.2,<2`, `fastapi[standard]>=0.141,<1`.
+Current framework lines include `langchain>=1.3,<2`, `langgraph>=1.2,<2`, `fastapi[standard]>=0.141,<1`, and current MCP Python SDK v2 `mcp>=2,<3`.
 
-## FastAPI project evolution
+## What comes after MCP
 
-- v5.1 — Run resource API
-- v5.2 — request/response contracts and dependency boundaries
-- v5.3 — HTTP request lifetime separated from Worker lifetime
-- v5.4 — native SSE + safe event projection + replay/retention
-- v5.5 — ETag/If-Match + idempotent approval/cancel commands
-- v5.6 — Bearer Principal / permissions / tenant derivation / CORS
-- v5.7 — ProblemDetails + exception handlers + request correlation
-- v5.8 — dependency overrides + layered HTTP/integration/OpenAPI contract tests
-- v5.9 — lifespan/resource ownership + liveness/readiness
-- v6.0 — final service composition + production deployment audit
+Docker is no longer treated as a standalone teaching track; containerization will appear when a later exercise actually needs deployment/isolation. The advanced main line is:
 
-The API preserves the earlier durable architecture: FastAPI owns HTTP contracts; product control-plane owns tenant/run/revision/commands; Queue/Workers own durable execution; LangGraph owns Graph state/checkpoints/interrupts. The v6.0 teaching profile remains deliberately process-local and runnable; declaring a production profile while keeping process-local RunStore/Queue/checkpointer/event/idempotency/auth metadata is rejected rather than mislabeled production-ready.
+```text
+MCP / Tool Ecosystem
+→ Browser / Shell / Code Sandbox Agent
+→ Agent Security / Prompt Injection
+→ Production Eval / Observability
+→ Distributed / Long-running Agent Runtime
+→ Agent System Design / Capstone
+```
 
-## What remains after FastAPI
-
-The original core job-skill sequence still has one major implementation track left: **Docker / deployment**. Vector DB was already integrated deeply into the RAG track, and evaluation has been integrated throughout LLM/RAG/Agent rather than postponed to one isolated course. After Docker, the original core roadmap is essentially complete; further tracks would be extensions such as Postgres/Redis/message queues, Kubernetes/cloud, observability, or framework-specific production infrastructure rather than missing fundamentals.
+Optional specialist topics can follow: self-hosted model inference, Kubernetes/cloud, GraphRAG/knowledge graphs, realtime/voice, computer-use GUI agents, CI/CD and deeper observability stacks.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. The static learning UI requires no backend or secret.
