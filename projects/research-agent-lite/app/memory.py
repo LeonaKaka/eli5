@@ -157,7 +157,7 @@ class MemoryStore:
     ) -> list[MemoryRecord]:
         if limit < 1:
             raise ValueError("limit must be >= 1")
-        terms = set(tokenize(query))
+        terms = _memory_terms(query)
         scored: list[tuple[int, float, str, MemoryRecord]] = []
         for record in self._records.values():
             if not record.active:
@@ -166,9 +166,19 @@ class MemoryStore:
                 continue
             if kinds is not None and record.kind not in kinds:
                 continue
-            overlap = len(terms & set(tokenize(record.content))) if terms else 0
+            overlap = len(terms & _memory_terms(record.content)) if terms else 0
             if terms and overlap == 0:
                 continue
             scored.append((overlap, record.confidence, record.id, record))
         scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
         return [item[3] for item in scored[:limit]]
+
+
+def _memory_terms(text: str) -> set[str]:
+    """Expand CJK runs with bigrams for a deterministic bilingual baseline."""
+    terms: set[str] = set()
+    for token in tokenize(text):
+        terms.add(token)
+        if len(token) >= 2 and all("\u4e00" <= ch <= "\u9fff" for ch in token):
+            terms.update(token[index : index + 2] for index in range(len(token) - 1))
+    return terms
