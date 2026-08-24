@@ -1,0 +1,51 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LangGraph 04 · Command / Send</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/langgraph12.css"><link rel="stylesheet" href="../assets/langgraph34.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Graph<small>LangChain / LangGraph</small></div><div class="nav-label">Framework Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">04 · Research Assistant v4.4</span><h1>有些 Node 不只是“改 State”。<br>它改完 State 的同时，就已经决定了下一跳。</h1><p class="lead">普通 conditional edge 很适合“先由 Node 更新 State，再由独立 router 读 State 选路”。但有些决策天然是一个原子结果：<b>我决定 route=research，同时下一步就去 research。</b>这时 `Command(update=..., goto=...)` 更贴切。另一方面，`Send` 解决的是完全不同的问题：运行时才知道要并行启动多少个下游任务。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>三种控制流原语先别混</h2><div class="sub">Conditional Edge、Command、Send 各有清楚边界。</div></div></div><p><button class="btn active" data-control-mode="edge">Conditional Edge</button> <button class="btn" data-control-mode="command">Command</button> <button class="btn" data-control-mode="send">Send</button></p><div class="command-result" id="controlCompare">Conditional Edge：routing function 只负责返回下一节点；state update 通常由前一个 node 单独返回。</div><div class="callout"><b>选择标准：</b>固定/条件路由用 Edge；“一次决策同时产生 update + goto”用 Command；运行时动态 fan-out N 个不同输入任务用 Send。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Conditional Edge：状态更新和路由是两个阶段</h2><div class="sub">这是 02 已经用过的经典结构。</div></div></div><pre>def classify(state):
+    return {"route": "research"}
+
+def route_after_classify(state):
+    return state["route"]
+
+builder.add_conditional_edges(
+    "classify",
+    route_after_classify,
+)</pre><div class="flow"><div class="node">classify update</div><span class="arrow">→</span><div class="node">merged State</div><span class="arrow">→</span><div class="node">router reads State</div><span class="arrow">→</span><div class="node">next node</div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>`Command`：update + goto 是同一个决策</h2><div class="sub">特别适合 handoff、routing decision、状态转移等本来就不可分的操作。</div></div></div><div class="command-lab"><p><button class="btn active" data-command-route="research">research</button> <button class="btn" data-command-route="direct">direct</button></p><div class="command-board"><div><div class="command-hop"><span class="hop-pill">decide</span><span class="arrow">→</span><span class="hop-pill" data-command-hop="research">research</span><span class="hop-pill" data-command-hop="direct">direct</span></div><pre id="commandState"></pre></div><div class="command-result"><b id="commandGoto">goto = —</b><p id="commandExplanation"></p></div></div></div><pre>return Command(
+    update={
+        "route": route,
+        "events": [f"decide:{route}"],
+    },
+    goto=route,
+)</pre><div class="callout warn"><b>Command 不是“更高级的 if”。</b>只有当 state update 和 next hop 本来就是一个逻辑决策时，它才更清晰；否则把所有 Edge 都塞成 Command 反而会让图结构难读。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>`Send`：下一步有多少个 Node 实例，编图时根本不知道</h2><div class="sub">这就是动态 map-reduce / fan-out 的典型场景。</div></div></div><div class="send-lab"><div class="send-controls"><label>fan-out 数量：<b id="sendCount">3</b></label><input id="sendRange" type="range" min="1" max="5" value="3"></div><div class="send-fanout" id="sendWorkers"></div><div class="reducer-bucket"><b>Reducer fan-in：evidence</b><pre id="sendBucket"></pre><div id="sendSummary"></div></div></div><pre>def fan_out_queries(state):
+    return [
+        Send("retrieve_one", {"query": q})
+        for q in state["queries"]
+    ]</pre><div class="callout"><b>Send 的第二个参数是每个下游任务自己的输入。</b>也就是说同一个 `retrieve_one` Node 可以同时存在多个 execution instance，各自拿不同 query。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Fan-out 能成立，Fan-in 还得靠 Reducer</h2><div class="sub">并行 worker 同时更新同一个字段，没有 merge semantics 就会冲突或覆盖。</div></div></div><pre>class RetrievalBatchState(TypedDict):
+    queries: list[str]
+    evidence: Annotated[list[str], operator.add]
+    summary: str</pre><div class="flow"><div class="node">Send q1</div><span class="arrow">↘</span><div class="node">retrieve_one</div></div><div class="flow"><div class="node">Send q2</div><span class="arrow">→</span><div class="node">evidence reducer</div><span class="arrow">→</span><div class="node">summarize</div></div><div class="flow"><div class="node">Send q3</div><span class="arrow">↗</span><div class="node">retrieve_one</div></div><div class="callout bad"><b>如果 evidence 没有 append reducer，动态并行不是“自动帮你合并”。</b>你仍然需要定义多个 worker update 怎样落回共享 State。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>`Send` 和静态 parallel edge 的区别</h2><div class="sub">Agent 05 的 ActionGraph 到这里有了框架对应物。</div></div></div><div class="compare-row"><div class="compare-cell"><b>静态 fan-out</b><pre>add_edge("a", "b")
+add_edge("a", "c")</pre><p>编图时已经知道 b/c 两条分支。</p></div><div class="compare-cell"><b>动态 Send</b><pre>return [
+  Send("worker", item)
+  for item in state["items"]
+]</pre><p>运行时 items 有 2 个就跑 2 份，有 50 个就生成 50 份任务。</p></div></div><div class="callout">真正上线时仍要考虑 `max_concurrency`、外部 API rate limit、成本和队列压力；`Send` 表达并行，不代表应该无限并发。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>并行结果的顺序不要当业务契约</h2><div class="sub">Reducer 解决“怎么合并”，不等于承诺完成顺序。</div></div></div><p>如果三个 retrieval worker 同时跑：</p><pre>q1 → 780 ms
+q2 → 110 ms
+q3 → 430 ms</pre><p>不要写业务逻辑依赖“evidence[0] 一定是 q1”。更稳的做法是结果带 stable id / source / query key，需要稳定输出时最后显式排序。</p><div class="callout">并发系统里，把执行时序当数据含义，是非常常见的隐性 bug。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Graph Loop 仍然需要终止边界</h2><div class="sub">Command 和 conditional edge 都可以形成循环；LangGraph 不会替业务判断“够了”。</div></div></div><pre>def route(state):
+    if enough_evidence(state):
+        return END
+    return "retrieve_more"</pre><p>Graph runtime 还有 recursion limit 作为硬上限，但它和前面 Agent 02 的 `LoopGuard` 一样：<b>硬上限是最后保险，不是任务完成判断。</b></p></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v4.4：Command + Send 都已经是真实 Graph</h2><div class="sub">项目测试两种完全不同的控制语义。</div></div></div><pre># Command
+Command(
+    update={"route": route, "events": [...]},
+    goto=route,
+)
+
+# Send
+[Send("retrieve_one", {"query": q})
+ for q in state["queries"]]</pre><p>`build_command_graph()` 验证 update + goto；`build_send_map_reduce_graph()` 则验证动态 queries 数量、并行 worker state、append reducer 和最终 summary。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2><div class="sub">真正会 LangGraph，要能解释为什么选这个原语，而不是只写得出来。</div></div></div><div class="quiz" data-quiz><h4>运行时拿到 37 个检索 query，需要同一个 retrieval node 分别处理，每份输入不同。最适合的 LangGraph 原语？</h4><button class="option" data-feedback="Command 更适合 update + goto，不是动态生成 N 份 worker state。">A. Command</button><button class="option" data-correct="1">B. Send，按每个 query 生成一个动态下游 task，再用 reducer 汇合结果</button><button class="option" data-feedback="固定 add_edge 需要编图时已知分支数量。">C. 手写 37 条 add_edge</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① Conditional Edge 和 Command 的差别？② 什么场景 update + goto 应绑在一起？③ Send 为什么适合 map-reduce？④ Send 的 worker input 和主 State 可以不同吗？⑤ fan-in 为什么需要 reducer？⑥ 并行结果顺序为什么不能当业务契约？⑦ recursion limit 和业务 stop condition 有什么区别？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="langgraph04">我能选择 Conditional Edge / Command / Send，并设计动态 fan-out + fan-in</label></div></section><div class="footer">下一批：05 Persistence / Threads / Checkpointers + 06 Interrupt / Human-in-the-loop / Resume。</div></main></div><script src="../assets/app.js"></script><script src="../assets/langgraph-nav.js"></script><script src="../assets/langgraph34.js"></script></body></html>
