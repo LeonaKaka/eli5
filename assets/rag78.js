@@ -1,0 +1,23 @@
+(()=>{
+const $=s=>document.querySelector(s);const $$=s=>Array.from(document.querySelectorAll(s));
+const modes={
+original:{title:'原始 query',queries:['比较论文 A 和论文 B 的方法差异，并解释为什么 A 的 Ec 更低'],note:'信息密度高，但把“找 A 方法 / 找 B 方法 / 找 Ec 机制”塞在一条 query 里，retriever 可能只覆盖其中一部分。'},
+rewrite:{title:'Rewrite',queries:['论文 A 与论文 B 的实验/模拟方法有何不同？'],note:'把口语问题改成更适合检索的表达，但必须保持原意。危险点是 rewrite 自己可能引入新实体或丢掉约束。'},
+multi:{title:'Multi-query',queries:['论文 A 使用了什么方法？','论文 B 使用了什么方法？','两篇论文关于 Ec 降低的机制证据分别是什么？'],note:'多种表达扩大召回机会，结果要 merge + dedup。query 数量增加也会增加检索成本和重复候选。'},
+decompose:{title:'Decomposition',queries:['子问题 1：论文 A 的方法是什么？','子问题 2：论文 B 的方法是什么？','子问题 3：A 的 Ec 更低由什么证据支持？','子问题 4：把 1–3 的证据做对比'],note:'把真正多跳问题拆成可分别检索/验证的子问题。最后一个步骤依赖前面证据，不该被伪装成一次普通向量搜索。'}
+};
+function renderQuery(mode='original'){const d=modes[mode];const box=$('#queryOutput');if(!box)return;box.innerHTML=`<div class="query-box"><b>${d.title}</b>${d.queries.map((q,i)=>`<div>${d.queries.length>1?`${i+1}. `:''}${q}</div>`).join('')}</div><div class="callout">${d.note}</div>`;$$('[data-qmode]').forEach(b=>b.classList.toggle('active',b.dataset.qmode===mode));const branches=$('#queryBranches');if(branches){const docs=mode==='original'?[['A methods',1],['B methods',0],['Ec mechanism',0]]:mode==='rewrite'?[['A methods',1],['B methods',1],['Ec mechanism',0]]:mode==='multi'?[['A methods',1],['B methods',1],['Ec mechanism',1]]:[['A methods',1],['B methods',1],['Ec mechanism',1]];branches.innerHTML=docs.map(([x,ok])=>`<div class="query-branch ${ok?'good':'warn'}"><b>${x}</b><p>${ok?'有召回机会':'可能被单 query 稀释'}</p></div>`).join('')}}
+$$('[data-qmode]').forEach(b=>b.addEventListener('click',()=>renderQuery(b.dataset.qmode)));renderQuery();
+const rewriteToggle=$('#rewriteDrift');if(rewriteToggle){rewriteToggle.addEventListener('change',()=>{const p=$('#rewritePreview');p.innerHTML=rewriteToggle.checked?'<b>❌ 漂移后的 rewrite</b><p>“比较论文 A/B 的实验方法” → “比较 A/B 的室温器件实验方法”</p><p>原问题没说室温，却被 rewrite 擅自加了约束。</p>':'<b>✅ 保真 rewrite</b><p>“比较论文 A/B 的方法差异” → “论文 A 与 B 的实验或模拟方法有何不同？”</p>'});rewriteToggle.dispatchEvent(new Event('change'))}
+const evidence=[
+{id:'e1',source:'paper_A',page:4,kind:'Methods',tokens:180,score:.96,text:'A uses phase-field simulation with random-field disorder and a triangular electric-field sweep.'},
+{id:'e2',source:'paper_A',page:7,kind:'Results',tokens:170,score:.94,text:'Increasing random-field disorder lowers the measured coercive field Ec.'},
+{id:'e3',source:'paper_A',page:7,kind:'Results overlap',tokens:155,score:.91,text:'Ec decreases as disorder strength increases; this chunk overlaps heavily with e2.'},
+{id:'e4',source:'paper_B',page:3,kind:'Methods',tokens:190,score:.90,text:'B uses direct domain-wall imaging under a slowly ramped external field.'},
+{id:'e5',source:'paper_B',page:6,kind:'Figure',tokens:210,score:.88,text:'Figure 3 tracks domain-wall displacement and identifies a depinning-like threshold.'},
+{id:'e6',source:'review_C',page:12,kind:'Background',tokens:220,score:.72,text:'A review summarizes several mechanisms for disorder-dependent switching.'}
+];
+function pack(){const budget=+($('#packBudget')?.value||650),cap=+($('#sourceCap')?.value||2);if($('#packBudgetVal'))$('#packBudgetVal').textContent=budget;if($('#sourceCapVal'))$('#sourceCapVal').textContent=cap;let used=0;const bySource={};const chosen=[];for(const e of evidence){if(e.id==='e3'&&chosen.some(x=>x.id==='e2'))continue;if((bySource[e.source]||0)>=cap)continue;if(used+e.tokens>budget)continue;chosen.push(e);used+=e.tokens;bySource[e.source]=(bySource[e.source]||0)+1}
+const stack=$('#evidenceStack');if(stack)stack.innerHTML=evidence.map(e=>{const on=chosen.some(x=>x.id===e.id);return `<div class="evidence-card ${on?'selected':'rejected'}"><div><b>${e.id} · ${e.kind}</b><div>${e.text}</div><div class="meta">${e.source} · page ${e.page} · ${e.tokens} tokens · relevance ${e.score}</div></div><b>${on?'KEEP':'DROP'}</b></div>`}).join('');if($('#packUsed'))$('#packUsed').textContent=`${used} / ${budget}`;if($('#packBar'))$('#packBar').style.width=`${Math.min(100,used/budget*100)}%`;if($('#packSources'))$('#packSources').textContent=Object.keys(bySource).length;if($('#packCount'))$('#packCount').textContent=chosen.length;const prev=$('#citationPreview');if(prev){const hasA=chosen.some(x=>x.id==='e2'),hasB=chosen.some(x=>x.id==='e5');prev.innerHTML=`<p>论文 A 中，随机场无序增强伴随 Ec 降低 ${hasA?'<span class="citation-mark">[A p.7]</span>':'<span class="citation-mark">[缺证据]</span>'}。论文 B 则通过畴壁位移观察到类似 depinning 的阈值行为 ${hasB?'<span class="citation-mark">[B p.6 Fig.3]</span>':'<span class="citation-mark">[缺证据]</span>'}。</p>`}}
+['packBudget','sourceCap'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener('input',pack)});pack();
+})();
