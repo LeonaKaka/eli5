@@ -1,0 +1,51 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LangGraph 06 · Interrupt / HITL / Resume</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/langgraph12.css"><link rel="stylesheet" href="../assets/langgraph56.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Graph<small>LangChain / LangGraph</small></div><div class="nav-label">Framework Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">06 · Research Assistant v4.6</span><h1>`interrupt()` 不是在 Agent 里 `input()` 一下。<br>它把“等待人”变成可持久、可跨进程恢复的 Graph 状态。</h1><p class="lead">真正的 HITL 不是让一个 Worker 卡着等三小时。LangGraph 遇到 `interrupt()` 时保存 thread state，把 JSON-serializable payload 暴露给调用方，然后结束当前执行。以后任意健康进程只要用<b>相同 thread_id</b>和 `Command(resume=...)` 就能继续。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>一次 interrupt 的真实生命周期</h2><div class="sub">暂停的是 graph execution，不是“挂住一个 Python 协程”。</div></div></div><div class="flow"><div class="node">Graph invoke</div><span class="arrow">→</span><div class="node">approval node</div><span class="arrow">→</span><div class="node">interrupt(payload)</div><span class="arrow">→</span><div class="node">Checkpoint + pause</div></div><div class="flow"><div class="node">Human/UI</div><span class="arrow">→</span><div class="node">Command(resume=value)</div><span class="arrow">→</span><div class="node">same thread_id</div><span class="arrow">→</span><div class="node">Graph continues</div></div><div class="callout"><b>interrupt 需要 checkpointer + thread_id。</b>没有持久 cursor，就不知道几小时后到底要恢复哪条 graph state。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>最小代码：暂停和恢复其实是两次 invocation</h2><div class="sub">resume value 会变成 node 内 `interrupt()` 的返回值。</div></div></div><pre>from langgraph.types import interrupt, Command
+
+def approval_node(state):
+    approved = interrupt({
+      "question": "Approve?",
+      "action": state["action"],
+    })
+    return Command(
+      goto="execute" if approved else "cancel"
+    )
+
+config = {"configurable": {"thread_id": "approval-42"}}
+
+paused = graph.invoke(initial_state, config=config)
+# paused["__interrupt__"] contains the payload
+
+resumed = graph.invoke(
+    Command(resume=True),
+    config=config,
+)</pre><div class="callout">如果改用 event streaming，interrupt 会通过 stream 的 interrupt projection 暴露；但底层语义仍然是同一条 thread checkpoint + resume。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive：Interrupt Replay Lab</h2><div class="sub">先切 Safe / Unsafe，再 Start → Approve/Reject，看 side effect 到底执行几次。</div></div></div><div class="interrupt-lab"><div class="interrupt-controls"><button class="btn active" data-int-mode="safe">Safe：副作用放 interrupt 后</button><button class="btn" data-int-mode="unsafe">Unsafe：副作用放 interrupt 前</button><button class="btn primary" id="interruptStart">Start</button><button class="btn" id="interruptApprove">Resume = Approve</button><button class="btn" id="interruptReject">Resume = Reject</button><button class="btn" id="interruptReset">Reset</button></div><div class="interrupt-stage"><div class="interrupt-node" data-int-node="start"><b>START</b><small>initial invoke</small></div><div class="interrupt-node" data-int-node="node"><b>approval node</b><small>从 node 开头执行</small></div><div class="interrupt-node" data-int-node="interrupt"><b>interrupt()</b><small>checkpoint + pause</small></div><div class="interrupt-node" data-int-node="resume"><b>Command(resume)</b><small>same thread</small></div><div class="interrupt-node" data-int-node="end"><b>END</b><small>execute / cancel</small></div></div><div class="interrupt-console"><div><b>Runtime</b><pre id="interruptLog"></pre></div><div><b>Status</b><p id="interruptStatus"></p><span>side effect execution count</span><div class="effect-counter" id="effectCount">0</div></div></div></div><div class="callout bad"><b>关键实验：</b>Unsafe 模式下，第一次执行到 interrupt 前副作用发生 1 次；resume 时 node 从开头重跑，副作用再发生 1 次。批准一次，现实世界却可能收到两次请求。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>为什么 node 会“从开头重跑”？</h2><div class="sub">LangGraph 恢复的是 checkpoint，不是 Python 栈帧。</div></div></div><pre>def node(state):
+    build_payload()       # resume 时会再跑
+    write_database()      # ⚠ 也会再跑
+    approved = interrupt(...)
+    ...</pre><p>恢复后 runtime 重新进入这个 node，并按 interrupt 调用顺序把 resume value 对应回正确的 `interrupt()`。因此 interrupt 前的代码必须能安全重复。</p><div class="callout"><b>这是框架的确定性恢复模型，不是 bug。</b>你前面 Agent 07 学的 replay safety 现在直接决定 node 怎么写。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Safe pattern：interrupt 前只做 pure proposal</h2><div class="sub">副作用放在批准后的 downstream node。</div></div></div><div class="safety-compare"><div class="safety-card bad"><b>❌ Unsafe</b><pre>def approval(state):
+    send_email(state)
+    ok = interrupt(...)
+    ...</pre><p>resume 重跑 → email 可能重复。</p></div><div class="safety-card good"><b>✅ Safer</b><pre>def approval(state):
+    ok = interrupt(proposal(state))
+    return Command(
+      goto="execute" if ok else "cancel"
+    )
+
+def execute(state):
+    send_email(state)</pre><p>interrupt 前没有现实副作用。</p></div></div><div class="callout warn"><b>“放到 interrupt 后面”也不等于 universal exactly-once。</b>execute node 自己仍可能 crash/replay，所以外部 side effect 依然要结合 idempotency key、checkpoint、reconcile。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Approve / Reject 只是最简单的 HITL</h2><div class="sub">resume payload 可以是任何 JSON-serializable 数据。</div></div></div><div class="persist-compare"><div class="persist-card"><strong>Approve</strong><p>`Command(resume=True)`，继续执行原动作。</p></div><div class="persist-card"><strong>Edit</strong><p>resume 一个修改后的参数对象，再由 node 校验后进入后续状态。</p></div><div class="persist-card"><strong>Feedback</strong><p>resume 人的评语/补充信息，让 graph 重新规划或生成。</p></div></div><div class="callout">和 Agent 06 一样：如果批准的是高风险 ToolCall，仍然应该让 payload 带足够具体的 action details，而不是只问“是否允许 Agent 继续”。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Same thread_id 是硬条件</h2><div class="sub">resume 不是“继续最近一次暂停”，而是继续指定 thread 的 pending interrupt。</div></div></div><div class="thread-strip"><span class="thread-pill active">thread_id = approval-42</span><span>pause</span><span class="arrow">→</span><span class="thread-pill active">approval-42</span><span>resume ✅</span></div><div class="thread-strip"><span class="thread-pill active">thread_id = approval-42</span><span>pause</span><span class="arrow">→</span><span class="thread-pill">approval-99</span><span>resume ❌ 另一条 state</span></div><div class="callout">产品层应该把 `thread_id` / run_id / tenant 做明确映射，不能让客户端随便猜一个 thread id 就尝试 resume。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Interrupt 的几个规则，背后的原因都是“可重放”</h2><div class="sub">这些不是风格建议。</div></div></div><table class="table"><tr><th>规则</th><th>为什么</th></tr><tr><td>不要把 `interrupt()` 吞进普通 try/except</td><td>interrupt 通过特殊控制流暂停 graph，错误捕获会破坏预期语义</td></tr><tr><td>不要在同一个 node 中随意重排多个 interrupt</td><td>resume 值按 interrupt 顺序匹配</td></tr><tr><td>payload 用简单 JSON-serializable 数据</td><td>要跨进程/持久层暴露给调用方</td></tr><tr><td>interrupt 前 side effect 必须幂等或移走</td><td>node resume 时从开头重跑</td></tr></table></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Interrupt 和我们 v4.0 ApprovalManager 怎么分工？</h2><div class="sub">Graph runtime 替你做 durable pause，不替你决定业务政策。</div></div></div><table class="table"><tr><th>LangGraph interrupt</th><th>应用 Approval Policy</th></tr><tr><td>暂停 thread</td><td>判断 READ_ONLY / SIDE_EFFECT / DESTRUCTIVE</td></tr><tr><td>持久 pending state</td><td>决定谁有资格批准</td></tr><tr><td>resume value 回到 node</td><td>绑定 exact action / fingerprint / tenant / actor</td></tr><tr><td>恢复 graph execution</td><td>审计、过期、拒绝、二次确认等业务规则</td></tr></table><div class="callout"><b>最稳的做法是组合。</b>Policy 决定“需不需要/谁能批准什么”，interrupt 负责“如何把 graph 稳定地停住并恢复”。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>Research Assistant v4.6 + 面试验收</h2><div class="sub">项目测试会把安全/危险两种 interrupt 布局都锁住。</div></div></div><pre>paused = graph.invoke(initial_state, config=config)
+assert "__interrupt__" in paused
+
+resumed = graph.invoke(
+    Command(resume=True),
+    config=config,
+)</pre><div class="quiz" data-quiz><h4>为什么 `send_email()` 不应该随手写在 `interrupt()` 前一行？</h4><button class="option" data-feedback="真正的问题不是速度，而是 node replay。">A. 因为 interrupt 会让模型变慢</button><button class="option" data-correct="1">B. resume 时包含 interrupt 的 node 会从开头重新执行，前置副作用可能重复发生</button><button class="option" data-feedback="payload 是否是布尔值和副作用重放无关。">C. 因为 Command(resume) 只能传字符串</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① interrupt 为什么需要 checkpointer/thread_id？② resume value 到底去了哪里？③ 为什么 node 会从开头重跑？④ side effect 应放哪里？⑤ interrupt 能否替代授权策略？⑥ approve/edit/feedback 三种 HITL 怎么设计？⑦ 为什么 same thread_id 是硬条件？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="langgraph06">我能设计可持久暂停/恢复的 HITL Graph，并避免 interrupt replay 导致重复副作用</label></div></section><div class="footer">下一批：07 Store / Long-term Memory + 08 Subgraphs / Multi-Agent。开始把跨 thread memory 和 specialist graph 接进来。</div></main></div><script src="../assets/app.js"></script><script src="../assets/langgraph-nav.js"></script><script src="../assets/langgraph56.js"></script></body></html>
