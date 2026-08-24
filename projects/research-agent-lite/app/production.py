@@ -106,7 +106,8 @@ class ProductionControlPlane:
     It deliberately does not execute the Agent itself. A production worker would
     combine this state contract with durable checkpoints, approval, tools and
     traces. The in-memory adapters exist to make concurrency/cancellation rules
-    deterministic in tests.
+    deterministic in tests. Lease/heartbeat expiry is assumed to be detected by
+    infrastructure; `requeue_abandoned()` models what happens after that fact.
     """
 
     def __init__(
@@ -152,7 +153,7 @@ class ProductionControlPlane:
             return ClaimResult(accepted=False, reason="run is cancelled", record=record)
         if record.revision != job.expected_revision:
             return ClaimResult(accepted=False, reason="stale or duplicate job delivery", record=record)
-        if record.status not in {RunStatus.PAUSED, RunStatus.WAITING_TOOL}:
+        if record.status is not RunStatus.PAUSED:
             return ClaimResult(
                 accepted=False,
                 reason=f"run is not claimable from status {record.status.value}",
@@ -177,6 +178,44 @@ class ProductionControlPlane:
             cancel_requested=True,
             status=RunStatus.CANCELLED,
         )
+
+    def requeue_abandoned(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str,
+        expected_revision: int,
+        checkpoint_id: str,
+        attempt: int = 2,
+    ) -> RunRecord:
+        """Requeue a RUNNING run after an external lease/heartbeat watchdog fires."""
+        current = self.store.get(run_id, tenant_id=tenant_id)
+        if current.cancel_requested or current.status is RunStatus.CANCELLED:
+            raise ValueError("cancelled run must not be requeued")
+        if current.status is not RunStatus.RUNNING:
+            raise ValueError("only an abandoned running run can be requeued")
+        if current.revision != expected_revision:
+            raise RuntimeError(
+                f"stale abandoned-run revision: expected {expected_revision}, current {current.revision}"
+            )
+        updated = self.store.update(
+            run_id,
+            tenant_id=tenant_id,
+            expected_revision=current.revision,
+            status=RunStatus.PAUSED,
+            current_checkpoint_id=checkpoint_id,
+        )
+        self.queue.enqueue(
+            RunJob(
+                id=f"{run_id}:recovery:r{updated.revision}:a{attempt}",
+                run_id=run_id,
+                tenant_id=tenant_id,
+                kind=JobKind.RESUME,
+                expected_revision=updated.revision,
+                attempt=attempt,
+            )
+        )
+        return updated
 
     def pause_for_approval(
         self,
