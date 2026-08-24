@@ -4,50 +4,52 @@ Scope: migrate Research Assistant v4.0 from a hand-built Agent control plane int
 
 Current reference line: LangChain 1.3.x + LangGraph 1.2.x.
 
-Current progress: **08 / 10 live**, Research Assistant **v4.8**.
+Current progress: **10 / 10 complete**, Research Assistant **v5.0**.
 
 ## 01 — LangChain vs LangGraph / Abstraction Ladder ✅
-Understand `create_agent` versus `StateGraph`, how LangChain agents are implemented on top of LangGraph, what problems each abstraction solves, when a simple `create_agent` is enough, when a custom graph is justified, and how the existing v4.0 AgentLoop maps onto graph concepts.
+Understand `create_agent` versus `StateGraph`, how LangChain agents are implemented on top of LangGraph, and when a custom graph is justified.
 
 ## 02 — StateGraph Core / State / Nodes / Edges / Reducers ✅
-Build a real `StateGraph`; define typed state, partial state updates, `START` / `END`, fixed edges, conditional routing and reducers. Learn why state is not conversation history and why reducers are merge semantics rather than convenience helpers.
+Build a real `StateGraph`; define typed state, partial updates, reducers, `START` / `END`, fixed edges and conditional routing.
 
 ## 03 — LangChain Tools / ToolNode / Agent Loop ✅
-Use `@tool`, `ToolNode`, `ToolMessage`, `tools_condition` and tool routing. Inspect the ReAct-style model ↔ tools loop, preserve tool-call/result correlation, and compare custom `StateGraph` control with LangChain `create_agent`.
+Use `@tool`, `ToolNode`, `ToolMessage` and `tools_condition`; preserve tool-call/result correlation and understand the standard model ↔ tools loop.
 
 ## 04 — Conditional Control Flow / Command / Send ✅
-Model branches and loops with conditional edges, use `Command` to combine state update + routing, use `Send` for dynamic fan-out/map-reduce, and connect these APIs to the ActionGraph / orchestration concepts from Agent 05. Reducers define fan-in semantics; dynamic fan-out does not remove concurrency/rate-limit policy.
+Use conditional edges, `Command(update + goto)` and `Send` dynamic fan-out/map-reduce with reducer-based fan-in.
 
 ## 05 — Persistence / Threads / Checkpointers ✅
-Use a checkpointer, `thread_id`, state history, checkpoint inspection, replay/time-travel concepts and fault recovery. Separate thread-scoped graph state from external run-control state.
+Use a checkpointer, `thread_id`, StateSnapshot inspection/history, update-state, replay/time-travel and fault-recovery semantics.
 
 ## 06 — Interrupt / Human-in-the-loop / Resume ✅
-Use `interrupt()` and `Command(resume=...)` for durable pauses, approval/edit/review flows, and understand why effects before an interrupt must be idempotent or externally reconciled.
+Use `interrupt()` and `Command(resume=...)` for durable HITL and preserve replay-safe side-effect boundaries.
 
 ## 07 — Memory / Store ✅
-Separate short-term thread state persisted by checkpointers from long-term cross-thread data persisted in a Store. Use runtime context and namespace tuples for user/workspace scope, while preserving application write policy, sensitive-data rejection and explicit invalidation.
+Separate thread-scoped checkpoints from cross-thread Store data, use Runtime context + namespace scope, and preserve application write policy/invalidation.
 
 ## 08 — Subgraphs / Multi-Agent / Handoff ✅
-Compose shared-state subgraphs directly, wrap private/different schemas with explicit input/output mapping, choose per-invocation/per-thread/stateless subgraph persistence, and use `Command.PARENT` for minimal-context handoffs to sibling parent nodes.
+Compose shared/private subgraphs, choose persistence scope and use `Command.PARENT` for minimal-context handoffs.
 
-## 09 — LangChain Middleware / Streaming / Observability
-Use LangChain middleware hooks, dynamic model/tool policies, retries and guardrails; stream graph updates/values/events; connect structured traces to trajectory eval and debugging.
+## 09 — LangChain Middleware / Streaming / Observability ✅
+Use real `AgentMiddleware` hook contracts for cross-cutting model-call policy and real LangGraph v2 `updates` / `values` / `custom` streaming. Separate product streaming, operational telemetry and trajectory/eval traces.
 
-## 10 — Production LangGraph Architecture
-Migrate the Research Assistant runtime into a graph-backed architecture while preserving tenant scope, run revision, approval, cancellation and replay-safety boundaries. Identify which responsibilities LangGraph can provide and which remain application/infrastructure concerns. Close the project at Research Assistant v5.0.
+## 10 — Production LangGraph Architecture ✅
+Close the project with `ProductionGraphBridge`, combining LangGraph thread/checkpoint/interrupt execution with the existing tenant-scoped product `RunStore` / Queue / optimistic revision / cancellation / approval-authorization control plane. Explicitly preserve the boundary between framework runtime, application control and infrastructure.
 
 ## Project evolution
-Continue `projects/research-agent-lite/` from Research Assistant v4.0:
 - v4.1 abstraction mapping + first compiled LangGraph ✅
-- v4.2 explicit typed StateGraph + reducers + routing ✅
-- v4.3 LangChain tools / ToolNode / create_agent comparison ✅
+- v4.2 typed StateGraph + reducers + routing ✅
+- v4.3 tools / ToolNode / create_agent comparison ✅
 - v4.4 Command / Send / conditional orchestration ✅
 - v4.5 checkpointers / threads / persistence ✅
 - v4.6 interrupts / human-in-the-loop resume ✅
 - v4.7 Store / long-term memory ✅
 - v4.8 subgraphs / multi-agent handoffs ✅
-- v4.9 middleware / streaming / observability
-- v5.0 production LangGraph architecture
+- v4.9 middleware / streaming / observability ✅
+- v5.0 production LangGraph architecture ✅
 
-## Teaching rule
-Do not treat the framework as magic. Every LangGraph abstraction should be mapped back to an engineering problem already implemented manually in v4.0. Framework behavior that affects durability, replay, side effects, permissions or tenant isolation must be stated explicitly rather than assumed.
+## Final boundary
+Do not treat the framework as magic. LangGraph now owns graph-level state, routing, persistence, interrupts, Store integration, subgraphs and streaming. It does not make `thread_id` an authorization token, replace product run revisions or queue worker leases, define who may approve side effects, guarantee exactly-once external actions, or remove tenant/memory/permission policy.
+
+## Next track
+FastAPI: expose the v5.0 run lifecycle through real service contracts for create/status/stream/approval/cancel.
