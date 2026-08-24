@@ -1,0 +1,65 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 06 · Auth / Security / CORS</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi56.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">06 · Research Assistant v5.6</span><h1>`X-Tenant-ID: tenant-a` 不是身份。<br>客户端自己写的 tenant 也不是授权。</h1><p class="lead">前四课为了教学依赖注入，暂时让 header 提供 tenant。现在正式撤掉这个信任：<b>Authorization → authenticate principal → derive tenant → check permission → scope resource</b>。同时把浏览器 CORS 和反向代理 forwarded headers 也放回正确的安全边界。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>Authentication 和 Authorization 是两件事</h2></div></div><div class="flow"><div class="node">Bearer token</div><span class="arrow">→</span><div class="node">Authentication<br>你是谁？</div><span class="arrow">→</span><div class="node">Principal</div><span class="arrow">→</span><div class="node">Authorization<br>你能做什么？</div><span class="arrow">→</span><div class="node">Resource scope</div></div><div class="callout"><b>401</b>：我不知道你是谁 / token 无效。<br><b>403</b>：我知道你是谁，但你缺权限。<br><b>404</b>：通过身份与权限后，目标资源不在你的 tenant scope；这里继续采用 anti-enumeration。</div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>旧版为什么危险？</h2></div></div><pre>GET /runs/run-42
+X-Tenant-ID: tenant-a
+
+如果服务器直接相信：
+tenant_id = request.headers["X-Tenant-ID"]
+
+攻击者只要改成：
+X-Tenant-ID: tenant-b
+→ 越权尝试</pre><p>Header 只是输入。除非它来自你已经验证过的可信上游并且链路边界明确，否则不能因为“它在 header 里”就升级成 identity。</p></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>v5.6：tenant 从 authenticated Principal 派生</h2></div></div><pre>Authorization: Bearer demo-owner-a
+        ↓
+HTTPBearer
+        ↓
+DemoTokenAuthenticator.authenticate(token)
+        ↓
+Principal(
+  subject="user-owner-a",
+  tenant_id="tenant-a",
+  permissions={
+    "runs:read",
+    "runs:create",
+    "runs:approve",
+    "runs:cancel",
+  },
+)
+        ↓
+route dependency checks permission
+        ↓
+resource lookup uses principal.tenant_id</pre><div class="callout warn"><b>Demo token 只是 provider-free 教学 authenticator。</b>生产要验证真实 IdP/JWT/session/API key 的签名、issuer、audience、expiry、revocation 等；但“tenant 从认证身份派生”这个结构不会变。</div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Interactive · Auth Boundary Lab</h2><div class="sub">切身份、动作和浏览器 Origin，看 401 / 403 / 404 / CORS 分别在哪一层发生。</div></div></div><div class="auth-lab"><div class="auth-controls"><select class="select-input" id="authIdentity"><option value="ownerA">owner · tenant-a</option><option value="viewerA">viewer · tenant-a</option><option value="ownerB">owner · tenant-b</option><option value="none">no token</option></select><select class="select-input" id="authAction"><option value="read">read tenant-a Run</option><option value="create">create Run</option><option value="approve">approve</option><option value="cancel">cancel</option></select><select class="select-input" id="authOrigin"><option value="allowed">https://app.example.test</option><option value="blocked">https://evil.example</option></select><span class="http-status ok" id="authStatus">200 · Authorized</span></div><div class="auth-grid"><div class="auth-pane"><b>决策链</b><pre id="authOut"></pre></div><div class="auth-pane"><b>记住顺序</b><p>1. 先 authenticate token。</p><p>2. 再检查 action permission。</p><p>3. 再按 principal tenant 找资源。</p><p>4. CORS 是浏览器跨 origin 策略，不替代后端 auth。</p></div></div></div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Permission matrix 比“is_admin”更可扩展</h2></div></div><div class="matrix"><div class="head">Principal</div><div class="head">read</div><div class="head">create</div><div class="head">approve</div><div class="head">cancel</div><div>owner · tenant-a</div><div class="yes">✅</div><div class="yes">✅</div><div class="yes">✅</div><div class="yes">✅</div><div>viewer · tenant-a</div><div class="yes">✅</div><div class="no">❌</div><div class="no">❌</div><div class="no">❌</div><div>owner · tenant-b</div><div class="yes">✅ 自己 tenant</div><div class="yes">✅</div><div class="yes">✅</div><div class="yes">✅</div></div><p>课程版通过 `require_permission("runs:approve")` 生成 FastAPI dependency。后面如果换 RBAC/ABAC/policy engine，route contract 不必推倒重写。</p></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>FastAPI Security primitive 在这里负责什么？</h2></div></div><pre>bearer_scheme = HTTPBearer(
+  scheme_name="BearerAuth",
+  auto_error=False,
+)
+
+async def get_current_principal(
+    credentials = Security(bearer_scheme),
+):
+    ... authenticate ...
+
+RunApprovePrincipal = Annotated[
+    Principal,
+    Depends(require_permission("runs:approve")),
+]</pre><p>这样 OpenAPI 会声明 HTTP Bearer security scheme；但 FastAPI 只帮你抽取认证材料和组织 dependency，真正 token 验证/授权策略仍是应用逻辑。</p></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>CORS：浏览器能不能跨 Origin 调你，不等于你有没有权限</h2></div></div><div class="cors-box"><div class="browser-box"><b>Frontend</b><p>Origin: `https://app.example.test`</p><p>Authorization: Bearer ...</p></div><span class="arrow">→</span><div class="api-box"><b>CORSMiddleware</b><p>origin / method / headers preflight</p><p>然后真正 request 仍走 auth + authz</p></div></div><pre>app.add_middleware(
+  CORSMiddleware,
+  allow_origins=["https://app.example.test"],
+  allow_credentials=True,
+  allow_methods=["GET","POST","OPTIONS"],
+  allow_headers=[
+    "Authorization",
+    "Content-Type",
+    "If-Match",
+    "Idempotency-Key",
+    "Last-Event-ID",
+  ],
+)</pre><div class="callout bad"><b>有 credentials 时不要图省事全 `*`。</b>当前 FastAPI/Starlette CORS 规则要求 credentials=true 时 origin/method/header 都显式配置，Bearer Authorization 也正属于 credentialed communication。</div></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>反向代理 Header 是另一条 trust boundary</h2></div></div><div class="trust-stack"><div class="trust-layer"><strong>Client</strong>可以自己伪造 `X-Forwarded-For / Proto / Host`。</div><div class="trust-layer"><strong>Trusted proxy / LB</strong>清洗并重新设置 forwarded headers。</div><div class="trust-layer"><strong>Uvicorn / FastAPI server</strong>只有配置 trusted proxy IP 后才应该解释这些 header。</div></div><p>当前官方文档通过 `--forwarded-allow-ips` 配置允许信任的代理来源。把它设成 `*` 只有在网络拓扑保证“只有可信 proxy 能直接访问 app server”时才合理。</p></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v5.6 安全边界</h2></div></div><pre>Browser / Client
+  ↓ Authorization: Bearer token
+FastAPI Security dependency
+  ↓
+Principal(subject, tenant, permissions)
+  ├─ runs:create → POST /runs
+  ├─ runs:read   → GET /runs / stream
+  ├─ runs:approve→ approval command
+  └─ runs:cancel → cancel command
+  ↓
+RunStore lookup scoped by principal.tenant_id
+  ↓
+ProductionGraphBridge / Queue / LangGraph</pre><div class="callout">`X-Tenant-ID` 即使客户端继续偷偷发送，也不再参与 tenant 决策。测试会直接验证 owner-a 加上伪造 `X-Tenant-ID: tenant-b` 后，Run 仍属于 tenant-a。</div></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>浏览器请求已经通过 CORS preflight，这说明什么？</h4><button class="option" data-feedback="CORS 不是身份系统。">A. 用户已经认证成功</button><button class="option" data-feedback="CORS 也不代表资源授权。">B. 用户已经拥有这个 Run 的权限</button><button class="option" data-correct="1">C. 浏览器被允许从这个 Origin 发出该类跨域请求；真正请求仍必须经过 authentication + authorization</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① 401/403/404 如何区分？② 为什么 tenant 不能直接信任客户端 header？③ Bearer token 抽取和 token 验证是不是同一件事？④ RBAC permission dependency 如何替换成 ABAC？⑤ CORS 为什么不是 CSRF/认证替代品？⑥ `allow_credentials=True` 为什么不该配全 wildcard？⑦ forwarded headers 为什么需要 trusted proxy list？⑧ thread_id/run_id 为什么都不是 authorization token？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi06">我能把 authentication、authorization、tenant scope、CORS 和 proxy trust 分成不同安全边界</label></div></section><div class="footer">下一批：07 Errors / Exception Handlers + 08 Testing / Dependency Overrides / OpenAPI Contract。把现在散落的 HTTPException 收成稳定错误协议，再系统化测试。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi56.js"></script></body></html>
