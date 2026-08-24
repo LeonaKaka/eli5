@@ -13,13 +13,14 @@
 )
 
 trace = RAGTrace(
+    case_id="compare-A-B-01",
     retrieved_ids=[...],
     packed_evidence_ids=[...],
     claims=[...],
 )</pre><div class="callout">这不是要求每个开放问题都有唯一标准答案，而是把<b>必须覆盖的关键事实和证据</b>变成可检查 contract。</div></section>
 <section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Interactive：平均分上涨，也可能不准发布</h2><div class="sub">把 LLM 10 的 Regression Gate 用到完整 RAG 链。</div></div></div><div class="rag-eval-lab"><div class="gate-controls"><button class="btn active" data-gate-mode="safe">安全改善</button><button class="btn" data-gate-mode="risky">总体涨但 Citation 回归</button><button class="btn" data-gate-mode="bad">整体回归</button></div><table class="gate-table"><thead><tr><th>Slice</th><th>Baseline</th><th>Candidate</th><th>Δ</th><th>Gate</th></tr></thead><tbody id="ragGateRows"></tbody></table><div id="ragGatePanel" class="diagnosis-panel"></div></div><div class="callout"><b>critical slice 可以一票否决。</b>例如 Answer Success 从 84% 涨到 89%，但 Citation correctness 从 96% 掉到 90%，科研助手仍然不该直接发布。</div></section>
 <section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Production Trace → 新 Eval Case：让线上失败变成永久资产</h2><div class="sub">否则同一种事故会反复发生。</div></div></div><div class="eval-loop"><div class="eval-node">Production failure</div><span class="arrow">→</span><div class="eval-node">Redact / classify</div><span class="arrow">→</span><div class="eval-node">Add golden case</div><span class="arrow">→</span><div class="eval-node">Fix system</div><span class="arrow">→</span><div class="eval-node">Regression Gate</div></div><div class="grid2"><div class="card"><b>应该保存</b><p>query type、planner version、retrieval ids/ranks、packer decision、prompt/model version、citation ids、failure layer。</p></div><div class="card"><b>不能无脑保存</b><p>PII、secret、未脱敏原文、无限 retention。生产 eval 数据也要经过隐私与访问控制。</p></div></div></section>
-<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v3.0：RAGEvalReport 成为闭环</h2><div class="sub">v3.0 不是“功能堆满”，而是主链每层都可观测、可评价、可回归。</div></div></div><pre>result = RAGEvaluator().evaluate(case, trace)
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v3.0：RAGEvalResult 成为闭环</h2><div class="sub">v3.0 不是“功能堆满”，而是主链每层都可观测、可评价、可回归。</div></div></div><pre>result = RAGEvaluator().evaluate(case, trace)
 
 print(result.retrieval_coverage)
 print(result.evidence_coverage)
