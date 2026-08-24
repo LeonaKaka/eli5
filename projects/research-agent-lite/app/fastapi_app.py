@@ -23,6 +23,7 @@ from .fastapi_commands import (
     parse_if_match,
 )
 from .fastapi_errors import install_error_layer, problem_responses
+from .fastapi_lifecycle import HealthResponse, RuntimeResourceManager
 from .fastapi_security import (
     DemoTokenAuthenticator,
     RunApprovePrincipal,
@@ -188,21 +189,26 @@ def create_app(
     event_store: InMemoryRunEventStore | None = None,
     idempotency_store: InMemoryIdempotencyStore | None = None,
     authenticator: DemoTokenAuthenticator | None = None,
+    resource_manager: RuntimeResourceManager | None = None,
     allowed_origins: tuple[str, ...] = ("https://app.example.test",),
 ) -> FastAPI:
+    resources = resource_manager or RuntimeResourceManager()
     app = FastAPI(
         title="Research Assistant API",
-        version="5.8.0",
+        version="6.0.0",
+        lifespan=resources.lifespan,
         description=(
             "HTTP boundary for the provider-neutral Research Assistant. "
             "Run creation enqueues durable work; mutating commands use auth, "
-            "revision preconditions and idempotency keys; errors use one public contract."
+            "revision preconditions and idempotency keys; errors use one public contract. "
+            "Process resources are owned by lifespan and expose separate live/ready probes."
         ),
     )
     app.state.bridge = bridge or ProductionGraphBridge()
     app.state.run_events = event_store or InMemoryRunEventStore()
     app.state.idempotency_store = idempotency_store or InMemoryIdempotencyStore()
     app.state.authenticator = authenticator or DemoTokenAuthenticator()
+    app.state.resource_manager = resources
 
     app.add_middleware(
         CORSMiddleware,
@@ -219,6 +225,33 @@ def create_app(
         expose_headers=["ETag", "Idempotency-Replayed", "X-Request-ID"],
     )
     install_error_layer(app)
+
+    @app.get(
+        "/health/live",
+        response_model=HealthResponse,
+        tags=["health"],
+        summary="Process liveness probe",
+    )
+    async def health_live() -> HealthResponse:
+        return resources.live()
+
+    @app.get(
+        "/health/ready",
+        response_model=HealthResponse,
+        responses={
+            503: {
+                "model": HealthResponse,
+                "description": "Process is alive but one or more required dependencies are not ready",
+            }
+        },
+        tags=["health"],
+        summary="Dependency-aware readiness probe",
+    )
+    async def health_ready(response: Response) -> HealthResponse:
+        snapshot = resources.readiness()
+        if snapshot.status != "ready":
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return snapshot
 
     @app.post(
         "/runs",
