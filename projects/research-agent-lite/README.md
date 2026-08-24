@@ -1,10 +1,10 @@
-# Research Assistant · evolving project
+# Research Assistant v2.0
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-The eight Python lessons closed at **Research Agent Lite v1.0**. The LLM Application Engineering track upgrades the same codebase toward **Research Assistant v2.0** instead of starting a new demo.
+The eight Python lessons closed at **Research Agent Lite v1.0**. The ten LLM Application Engineering lessons then upgraded the same codebase into **Research Assistant v2.0** instead of starting a new demo.
 
-Current project level: **v1.8**.
+Current project level: **v2.0**.
 
 ## What Python v1.0 demonstrates
 
@@ -17,7 +17,7 @@ Current project level: **v1.8**.
 - composition / dependency injection
 - pytest unit and integration-style tests
 
-## LLM track increments already landed
+## LLM increments
 
 - **v1.1** — model API / provider boundary concepts
 - **v1.2** — conversation state and history strategy
@@ -27,8 +27,10 @@ Current project level: **v1.8**.
 - **v1.6** — `PaperAssessment` / `StructuredResult`; Pydantic validation and explicit refusal state
 - **v1.7** — `ToolCall`, `ToolRegistry`, `ToolExecutor`; arguments are validated and side effects require explicit approval
 - **v1.8** — `AssetRef`, `SourceRef`, `PreparedAsset`, `AssetPipeline`; file policy and page/timestamp provenance are explicit
+- **v1.9** — `ModelRouter`; capability gates happen before weighted quality/cost/latency/reliability ranking
+- **v2.0** — `EvalCase`, `EvalReport`, `RegressionGate`; critical-slice regressions can block release even when the average improves
 
-The project remains offline-first for now: no API key is required. Real provider adapters arrive later so architecture and failure behavior can be tested before credentials and network variability are introduced.
+The project remains offline-first: no API key is required. The goal is to make architecture, contracts and failure behavior deterministic before mapping them onto a real provider SDK.
 
 ## Run
 
@@ -50,12 +52,14 @@ app/
 ├── errors.py       # error taxonomy
 ├── sources.py      # PaperSource protocol + demo adapters
 ├── agent.py        # orchestration, concurrency, retry, partial result
-├── context.py      # v1.3 context selection + token budgeting
-├── generation.py   # v1.4 provider-neutral generation profiles
-├── streaming.py    # v1.5 stream state + partial/final semantics
-├── structured.py   # v1.6 structured-output contracts
-├── tools.py        # v1.7 tool schema / permission / execution boundary
-├── multimodal.py   # v1.8 asset policy, preparation and provenance
+├── context.py      # context selection + token budgeting
+├── generation.py   # provider-neutral generation profiles
+├── streaming.py    # stream state + partial/final semantics
+├── structured.py   # structured-output contracts
+├── tools.py        # tool schema / permission / execution boundary
+├── multimodal.py   # asset policy, preparation and provenance
+├── routing.py      # capability gate + explainable model routing
+├── evals.py        # eval reports + regression gate
 └── main.py         # CLI entrypoint
 
 tests/
@@ -63,13 +67,14 @@ tests/
 ├── test_agent.py
 ├── test_context_generation.py
 ├── test_streaming_structured.py
-└── test_tools_multimodal.py
+├── test_tools_multimodal.py
+└── test_routing_evals.py
 ```
 
 ## Why these modules remain provider-neutral
 
-`ContextBuilder` accepts an injected token estimator because exact tokenization depends on the model. `GenerationProfile` stores semantic intent instead of pretending every provider exposes identical knobs. `StreamCollector` models terminal states without copying one provider's event names. `ToolExecutor` treats model tool calls as untrusted proposals until schema and permission checks pass. `AssetPipeline` separates a stored asset from the smaller, provenance-carrying parts actually sent to a model.
+The project teaches durable engineering boundaries rather than one SDK's current parameter names. A later real provider adapter can map tokenization, reasoning controls, stream events, tool schemas, file inputs and usage accounting onto the chosen provider while keeping the application contracts testable.
 
 ## Next step
 
-LLM 09–10 will add model-routing / reliability policy and an eval + prompt-lifecycle layer. After those boundaries are stable, a real provider adapter can map this neutral architecture onto the capabilities actually supported by the chosen model API.
+The next course track is RAG. It can reuse `AssetRef`, `SourceRef`, `ContextBuilder`, structured outputs, routing and evals while adding parsing, chunking, embeddings, retrieval, hybrid search, reranking and citation-quality evaluation.
