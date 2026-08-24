@@ -29,11 +29,11 @@ Agent loop → state/budgets → planning → memory → tool orchestration → 
 
 Full scope: `docs/agent-roadmap.md`.
 
-### LangChain / LangGraph — 2/10 live
+### LangChain / LangGraph — 4/10 live
 - 01 LangChain vs LangGraph / abstraction ladder / `create_agent` vs custom `StateGraph` ✅
 - 02 `StateGraph` core / State / Node / Edge / Reducer / conditional routing / compile ✅
-- 03 LangChain Tools / `ToolNode` / Agent Loop
-- 04 Conditional Flow / `Command` / `Send`
+- 03 LangChain `@tool` / `ToolNode` / `ToolMessage` / `tools_condition` / Agent Loop ✅
+- 04 Conditional Flow / `Command` / `Send` / dynamic fan-out / reducer fan-in ✅
 - 05 Persistence / Threads / Checkpointers
 - 06 Interrupt / Human-in-the-loop / Resume
 - 07 Memory / Store
@@ -54,7 +54,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and the LangChain / LangGraph track now evolves it toward **Research Assistant v5.0**. Current project level: **v4.2**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and the LangChain / LangGraph track now evolves it toward **Research Assistant v5.0**. Current project level: **v4.4**.
 
 ```bash
 cd projects/research-agent-lite
@@ -70,8 +70,10 @@ Current framework dependencies intentionally track the current major lines used 
 
 - v4.1 — first real compiled `StateGraph`, mapping manual Agent concepts onto framework execution without a model provider
 - v4.2 — typed graph state, partial node updates, append reducers, fixed edges and conditional routing
+- v4.3 — real LangChain tool schema + LangGraph `ToolNode` / `tools_condition`; deterministic model node emits genuine `AIMessage.tool_calls`, and Tool results return as correlated `ToolMessage` objects
+- v4.4 — `Command(update + goto)` plus `Send` dynamic map-reduce, reducer-based fan-in and explicit dynamic worker state
 
-The migration is incremental. Existing Tool, RAG, approval, replay-safety, tenant, authorization and evaluation boundaries remain application concerns unless a later lesson explicitly maps them to a framework abstraction.
+The migration is incremental. Existing Tool authorization, RAG, approval, replay-safety, tenant, authorization and evaluation boundaries remain application concerns unless a later lesson explicitly maps them to a framework abstraction. `ToolNode` executes registered tools but is not a replacement for tenant authorization or side-effect approval. `Send` expresses dynamic work, but production concurrency/rate limits still need explicit policy.
 
 ## Pages
-Deployed with GitHub Actions from the repository root. No backend or secret is required for the static learning UI. The runnable project itself now depends on LangChain/LangGraph for the framework track, but the first graph lessons remain model-free and do not require an API key.
+Deployed with GitHub Actions from the repository root. No backend or secret is required for the static learning UI. Lessons 01–04 remain provider-free: they exercise real LangGraph APIs without requiring an external model key.
