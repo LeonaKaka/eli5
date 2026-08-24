@@ -23,25 +23,30 @@ Agent loop → state/budgets → planning → memory → tool orchestration → 
 Full scope: `docs/agent-roadmap.md`.
 
 ### LangChain / LangGraph — 10/10 complete
-- 01 abstraction ladder / `create_agent` vs custom `StateGraph` ✅
-- 02 State / Node / Edge / Reducer / compile ✅
-- 03 `@tool` / `ToolNode` / `ToolMessage` / `tools_condition` ✅
-- 04 `Command` / `Send` / dynamic fan-out / reducer fan-in ✅
-- 05 thread / checkpointer / StateSnapshot / history / replay ✅
-- 06 `interrupt()` / HITL / `Command(resume=...)` / replay-safe side effects ✅
-- 07 Store / Runtime context / namespaced cross-thread memory / write policy ✅
-- 08 shared/private subgraphs / persistence modes / `Command.PARENT` handoff ✅
-- 09 LangChain middleware / LangGraph v2 streaming / observability ✅
-- 10 production LangGraph architecture / product-control boundaries ✅
+StateGraph → ToolNode → Command/Send → persistence → interrupt/resume → Store → subgraphs/handoffs → middleware/streaming → production runtime boundaries.
 
 Full scope: `docs/langchain-langgraph-roadmap.md`.
+
+### FastAPI — 2/10 live
+- 01 API boundary / ASGI / `POST /runs` / `GET /runs/{id}` / 201 / 404 / OpenAPI ✅
+- 02 Pydantic contracts / `Annotated + Depends` / tenant context / response filtering ✅
+- 03 Async boundary / Worker separation
+- 04 SSE streaming
+- 05 Approval / Cancel / Idempotent commands
+- 06 Auth / Security / CORS
+- 07 Errors / Exception handlers
+- 08 Testing / Dependency overrides / OpenAPI contract
+- 09 Lifespan / Health / Readiness
+- 10 Production Agent API Architecture
+
+Full scope: `docs/fastapi-roadmap.md`.
 
 ## Teaching contract
 Every lesson must include a concrete engineering problem, visual/explorable explanation, code evolution, at least one failure case, a continuous project increment, and interview-level checks.
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and LangChain / LangGraph now closes at **Research Assistant v5.0**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, LangChain / LangGraph at v5.0, and FastAPI now evolves it toward **Research Assistant v6.0**. Current level: **v5.2**.
 
 ```bash
 cd projects/research-agent-lite
@@ -49,33 +54,17 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 pytest -q
+uvicorn app.fastapi_app:app --reload
 ```
 
-Framework dependencies track the course reference line: `langchain>=1.3,<2` and `langgraph>=1.2,<2`.
+Current framework/service dependencies follow the course reference lines: `langchain>=1.3,<2`, `langgraph>=1.2,<2`, `fastapi[standard]>=0.141,<1`.
 
-## LangGraph project evolution
+## FastAPI project evolution
 
-- v4.1 — first compiled `StateGraph`
-- v4.2 — typed state, partial updates, reducers, conditional routing
-- v4.3 — real ToolNode / ToolMessage loop
-- v4.4 — Command + Send dynamic orchestration
-- v4.5 — checkpointer / thread / checkpoint history
-- v4.6 — interrupt / durable resume
-- v4.7 — Store / Runtime context / memory policy
-- v4.8 — subgraphs / private state / parent handoff
-- v4.9 — real AgentMiddleware hook contract + LangGraph v2 updates/values/custom stream
-- v5.0 — `ProductionGraphBridge`, joining LangGraph checkpoints/interrupts with tenant-scoped RunStore, Queue, optimistic worker revisions, approval authorization and cancellation
+- v5.1 — first real FastAPI application; `POST /runs` creates/enqueues a Run and `GET /runs/{run_id}` reads it
+- v5.2 — explicit request/response Pydantic models, tenant/runtime dependencies, anti-enumeration lookup and public response filtering
 
-The final architecture deliberately keeps three layers distinct:
-
-1. **LangGraph runtime** — graph state, routing, checkpoint, interrupt, Store, subgraph, streaming.
-2. **Application control plane** — tenant, product run status, revision, approval authorization, cancellation, ownership and business policy.
-3. **Infrastructure** — durable databases/checkpointers/stores, queue/broker, worker lease/heartbeat, secrets, scaling and telemetry backend.
-
-A `thread_id` is not an authorization token. A checkpoint does not replace queue/worker CAS. An interrupt does not replace approval policy. Framework orchestration does not remove side-effect idempotency or replay-safety requirements.
+The HTTP layer deliberately preserves the existing architecture: request lifetime is not Agent-run lifetime. Creating a Run does not execute the long Agent inline; Queue/Worker/LangGraph remain separate. The current `X-Tenant-ID` dependency is a teaching input only and is not presented as production authentication.
 
 ## Pages
-Deployed with GitHub Actions from the repository root. The static learning UI requires no backend or secret. The framework lessons remain provider-free by using deterministic graph/model boundaries where possible.
-
-## Next track
-FastAPI: expose the existing v5.0 Run / status / streaming / approval / cancel lifecycle as a real service instead of starting from toy endpoints.
+Deployed with GitHub Actions from the repository root. The static learning UI requires no backend or secret.
