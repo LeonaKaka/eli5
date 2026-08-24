@@ -4,7 +4,7 @@ Scope: expose Research Assistant v5.0 as a real HTTP service without collapsing 
 
 Current reference line: FastAPI 0.141.x, Pydantic v2.
 
-Current progress: **06 / 10 live**, Research Assistant **v5.6**.
+Current progress: **08 / 10 live**, Research Assistant **v5.8**.
 
 ## 01 — API Boundary / ASGI / First Run API ✅
 Build the first real service around the existing product run lifecycle. Understand ASGI request/response boundaries, `FastAPI()`, path operations, `POST /runs`, `GET /runs/{run_id}`, 201/200/404 semantics and automatic OpenAPI. The HTTP request only submits work; it does not execute a long Agent run inline.
@@ -19,16 +19,16 @@ Understand `async def`, blocking I/O, FastAPI threadpool behavior and why async 
 Expose `/runs/{run_id}/stream` with native `EventSourceResponse` / `ServerSentEvent`. Use stable client-safe event types, sequence ids, `Last-Event-ID` replay, disconnect awareness and bounded retention. A retention gap is explicit rather than silently dropping history; raw Graph/debug/control-plane state is never the public stream schema.
 
 ## 05 — Approval / Cancel / Idempotent Commands ✅
-Add exact approval and cancellation command endpoints. Public Run responses expose a revision ETag; mutating commands require strong `If-Match` preconditions plus `Idempotency-Key`. Same-key/same-command retries replay the original response without a second RESUME; key reuse with a different command is 409; stale revisions are 412 and missing preconditions are 428. The teaching idempotency adapter uses atomic single-process execute-once semantics and documents the need for durable cross-replica storage in production.
+Add exact approval and cancellation command endpoints. Public Run responses expose a revision ETag; mutating commands require strong `If-Match` preconditions plus `Idempotency-Key`. Same-key/same-command retries replay the original response without a second RESUME; key reuse with a different command is 409; stale revisions are 412 and missing preconditions are 428.
 
 ## 06 — Auth / Security / CORS / Trusted Boundaries ✅
-Replace trusted `X-Tenant-ID` with Bearer authentication. A token becomes a `Principal(subject, tenant_id, permissions)`; route dependencies enforce `runs:read/create/approve/cancel`, and resource scope uses the tenant derived from authenticated identity. Add explicit credentialed CORS policy and distinguish browser origin policy from backend authorization. Document forwarded-header trust as a reverse-proxy/server boundary rather than trusting arbitrary client `X-Forwarded-*` input.
+Replace trusted `X-Tenant-ID` with Bearer authentication. A token becomes a `Principal(subject, tenant_id, permissions)`; route dependencies enforce `runs:read/create/approve/cancel`, and resource scope uses the tenant derived from authenticated identity. Add explicit credentialed CORS and separate proxy/header trust from application identity.
 
-## 07 — Errors / Exception Handlers / Problem Details
-Map domain failures to stable HTTP status/error schemas: validation, not found, forbidden, conflict, unavailable and internal errors. Use exception handlers without leaking stack traces or internal state.
+## 07 — Errors / Exception Handlers / Problem Details ✅
+Install a stable `ProblemDetails` public error contract across request validation, authentication/authorization, not-found, conflict/precondition and unexpected server errors. Generate a server request id and expose it in both response header/body for private-log correlation. Preserve protocol-significant headers such as `WWW-Authenticate`, and never echo raw request bodies, stack traces, checkpoint state or exception text in generic 500 responses. Document error models in path-operation `responses=` as well as handling them at runtime.
 
-## 08 — Testing / Dependency Overrides / OpenAPI Contract
-Use `TestClient`/httpx, dependency overrides, fake control-plane adapters, tenant regressions, idempotency tests and OpenAPI/schema checks. Distinguish endpoint-unit tests from integration tests.
+## 08 — Testing / Dependency Overrides / OpenAPI Contract ✅
+Use `TestClient`, `app.dependency_overrides`, fake Principal/control-plane adapters and selective OpenAPI assertions. Separate endpoint-unit tests from integration tests: unit tests may replace auth/external adapters, while revision/Queue/LangGraph behavior remains real in integration tests when those are the mechanisms under test. Contract tests lock Bearer security, command headers, ProblemDetails and important response codes without snapshotting irrelevant generated OpenAPI noise.
 
 ## 09 — Lifespan / Health / Readiness / Resource Management
 Manage long-lived DB/HTTP/queue clients with lifespan. Separate liveness/readiness, connection-pool ownership, shutdown and startup failure behavior.
@@ -44,10 +44,10 @@ Continue `projects/research-agent-lite/` from Research Assistant v5.0:
 - v5.4 native SSE / Last-Event-ID / safe event projection ✅
 - v5.5 approval/cancel + ETag/If-Match + idempotent command API ✅
 - v5.6 Bearer authentication + Principal permissions + tenant derivation + CORS ✅
-- v5.7 error model/exception handlers
-- v5.8 HTTP tests/dependency overrides/OpenAPI contract
+- v5.7 ProblemDetails + exception handlers + request correlation ✅
+- v5.8 dependency overrides + layered HTTP/integration/OpenAPI contract tests ✅
 - v5.9 lifespan/health/readiness
 - v6.0 production Agent API architecture
 
 ## Teaching rule
-HTTP convenience must not erase system boundaries. A FastAPI endpoint should not directly run long-lived Agent work merely because it can be declared `async`. Authentication is not authorization; CORS is not either. Optimistic revision, idempotency, durable queueing, Graph replay safety, approval identity, cancellation and event retention remain explicit contracts.
+HTTP convenience must not erase system boundaries. A FastAPI endpoint should not directly run long-lived Agent work merely because it can be declared `async`. Authentication is not authorization; CORS is not either. Uniform error JSON must not erase meaningful HTTP status codes, and fast tests must not mock away the concurrency/recovery mechanisms they are supposed to verify.
