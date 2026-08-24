@@ -22,6 +22,7 @@ from .fastapi_commands import (
     normalize_idempotency_key,
     parse_if_match,
 )
+from .fastapi_errors import install_error_layer, problem_responses
 from .fastapi_security import (
     DemoTokenAuthenticator,
     RunApprovePrincipal,
@@ -123,7 +124,6 @@ def _load_public_run(
     try:
         return bridge.control.store.get(run_id, tenant_id=tenant_id)
     except (KeyError, PermissionError) as exc:
-        # Avoid telling one tenant whether another tenant's run id exists.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="run not found",
@@ -192,11 +192,11 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(
         title="Research Assistant API",
-        version="5.6.0",
+        version="5.8.0",
         description=(
             "HTTP boundary for the provider-neutral Research Assistant. "
             "Run creation enqueues durable work; mutating commands use auth, "
-            "revision preconditions and idempotency keys."
+            "revision preconditions and idempotency keys; errors use one public contract."
         ),
     )
     app.state.bridge = bridge or ProductionGraphBridge()
@@ -216,13 +216,15 @@ def create_app(
             "If-Match",
             "Last-Event-ID",
         ],
-        expose_headers=["ETag", "Idempotency-Replayed"],
+        expose_headers=["ETag", "Idempotency-Replayed", "X-Request-ID"],
     )
+    install_error_layer(app)
 
     @app.post(
         "/runs",
         response_model=RunResponse,
         status_code=status.HTTP_201_CREATED,
+        responses=problem_responses(401, 403, 422, 500),
         tags=["runs"],
         summary="Create a queued Research Assistant run",
     )
@@ -254,6 +256,7 @@ def create_app(
     @app.get(
         "/runs/{run_id}",
         response_model=RunResponse,
+        responses=problem_responses(401, 403, 404, 500),
         tags=["runs"],
         summary="Read one authorized tenant-scoped run",
     )
@@ -274,6 +277,7 @@ def create_app(
     @app.get(
         "/runs/{run_id}/stream",
         response_class=EventSourceResponse,
+        responses=problem_responses(400, 401, 403, 404, 409, 422, 500),
         tags=["runs"],
         summary="Stream authorized client-safe Run events with SSE",
     )
@@ -319,6 +323,7 @@ def create_app(
     @app.post(
         "/runs/{run_id}/approvals/{approval_request_id}",
         response_model=RunResponse,
+        responses=problem_responses(400, 401, 403, 404, 409, 412, 422, 428, 500),
         tags=["commands"],
         summary="Approve or reject one exact paused approval request",
     )
@@ -409,6 +414,7 @@ def create_app(
     @app.post(
         "/runs/{run_id}/cancel",
         response_model=RunResponse,
+        responses=problem_responses(400, 401, 403, 404, 409, 412, 422, 428, 500),
         tags=["commands"],
         summary="Request idempotent cancellation of one Run",
     )
