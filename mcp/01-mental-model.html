@@ -1,0 +1,50 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MCP 01 · Mental Model</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/mcp12.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 MCP<small>Tool Ecosystem</small></div><div class="nav-label">Advanced Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">01 · Research Assistant v6.1</span><h1>MCP 不是“Agent 的 USB”。<br>先搞清楚谁在控制什么。</h1><p class="lead">我们的 Agent 已经会 Tool Calling，但工具仍然跟应用代码绑在一起。MCP 的价值是把<b>能力提供者</b>和<b>模型宿主应用</b>拆开，并用统一协议发现/调用。第一课只做一件事：建立不会混乱的 Host / Client / Server / Primitive 心智模型。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先看真实工程问题</h2></div></div><pre>Research Assistant 现在想接：
+
+paper search
+filesystem
+GitHub
+SQL database
+lab instrument
+browser
+
+如果每个能力都这样：
+
+app/search_tool.py
+app/github_tool.py
+app/sql_tool.py
+app/filesystem_tool.py
+...
+
+→ 每个 Host 都重新做 schema / discovery / transport / errors / lifecycle glue</pre><p>MCP 的目标不是替你做业务逻辑，而是让能力提供者用统一接口告诉 Host：“我能做什么、怎么调用、有什么上下文/模板”。</p></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Host → Client → Server，三层不要揉成一团</h2></div></div><div class="host-stack"><div class="host-box"><strong>Host</strong>真正的 AI 应用。拥有 LLM、LangGraph、conversation、tenant、permission、approval、UI。</div><span class="arrow">→</span><div class="host-box"><strong>MCP Client</strong>Host 里负责讲 MCP 的连接实例。discover/list/call/read/get。</div><span class="arrow">→</span><div class="host-box"><strong>MCP Server</strong>独立能力提供者。可以本地进程，也可以远程服务。</div></div><div class="callout"><b>关键：</b>模型通常不“直接连接 MCP server”。Host 创建 client，Host 决定把哪些能力交给模型。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>三种 primitive 的区别首先是“控制权”</h2></div></div><div class="control-table"><div class="head">Primitive</div><div class="head">典型控制者</div><div class="head">你应该问的问题</div><div class="head">例子</div><div><b>Tool</b></div><div>Model</div><div>模型是否应该决定何时执行这个 capability？</div><div>search / query / write / create</div><div><b>Resource</b></div><div>Application</div><div>这是 Host 应该按 URI 选择并装入 context 的数据吗？</div><div>file / schema / paper record / config</div><div><b>Prompt</b></div><div>User</div><div>这是用户明确选择的可复用 workflow/template 吗？</div><div>compare papers / review draft</div></div><p>这是官方 MCP 长期采用的核心分工：Tools 偏 model-controlled，Resources 偏 application-controlled，Prompts 偏 user-controlled。真正实现可以有 UI/策略变化，但用这个控制层次判断最不容易设计错。</p></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Interactive · Primitive Decision Lab</h2><div class="sub">勾你真正想要的控制意图。故意勾两个，看看为什么“万能 tool”通常是坏设计。</div></div></div><div class="mcp-lab"><div class="mcp-controls"><label><input type="checkbox" id="asTool" checked>模型决定何时执行动作/查询</label><label><input type="checkbox" id="asResource">应用按地址加载 context</label><label><input type="checkbox" id="asPrompt">用户选择 workflow</label></div><div class="mcp-grid"><div class="primitive-card" data-primitive="tool"><b>Tool</b><span class="owner-pill">model-controlled</span><p>有参数、有执行、有结果。可能读，也可能写。</p></div><div class="primitive-card" data-primitive="resource"><b>Resource</b><span class="owner-pill">application-controlled</span><p>URI-addressed content。Host 决定什么时候读进 context。</p></div><div class="primitive-card" data-primitive="prompt"><b>Prompt</b><span class="owner-pill">user-controlled</span><p>可复用的 messages 模板，由用户/产品 UI 选择。</p></div></div><div class="mcp-result"><b>Decision</b><pre id="primitiveOut"></pre></div></div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>为什么“读 paper”可能同时出现 Tool 和 Resource？</h2></div></div><pre>search_papers("domain wall")
+→ Tool
+→ 模型不知道 paper id，主动搜索
+
+research://paper/rfim-domain-wall
+→ Resource
+→ Host 已经知道准确地址，读取指定 context</pre><p>它们不是按“底层都是数据库 SELECT”分类，而是按<b>上层控制语义</b>分类。同一个 backend 完全可以同时支撑 Tool 和 Resource。</p></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>MCP 和 LangGraph 不重叠</h2></div></div><div class="boundary-strip"><div class="boundary-card good"><b>MCP</b><p>能力发现、调用、资源、模板、transport/protocol。</p></div><div class="boundary-card good"><b>LangGraph</b><p>Agent state、control flow、checkpoint、interrupt/resume。</p></div><div class="boundary-card good"><b>FastAPI / App</b><p>身份、tenant、业务 command、HTTP 产品 API。</p></div><div class="boundary-card bad"><b>错误想法</b><p>“接了 MCP，我就不需要权限、approval、RunStore、Agent runtime。”</p></div></div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Capability discovery 不是 capability authorization</h2></div></div><pre>MCP Server advertises:
+
+- read_file
+- write_file
+- delete_file
+- run_shell
+
+Host policy may expose to this Agent:
+
+✅ read_file
+✅ write_file(workspace only)
+❌ delete_file
+❌ run_shell</pre><div class="callout warn">这是后面 MCP Security 的核心前提：<b>server 能做什么</b>和<b>当前模型被允许做什么</b>必须是两层。</div></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>2026 的 MCP 还发生了一个重要变化</h2></div></div><p>最新 2026-07-28 协议把现代 HTTP 核心改成 stateless：不再要求旧式 initialize/session id；请求可以带上协议/客户端元信息独立到达任意 replica。Server discovery 也有新的 `server/discover`。这对后面第 03 课的远程 MCP 扩容很关键。</p><div class="callout">因此网上很多“每个 MCP client 必须维持一个 stateful HTTP session”的旧文章，现在只能代表旧协议时代。</div></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>v6.1 项目增量</h2></div></div><pre>app/mcp_contracts.py
+
+MCPPrimitive
+  TOOL
+  RESOURCE
+  PROMPT
+
+ControlOwner
+  MODEL
+  APPLICATION
+  USER
+
+recommend_primitive(...)
+→ 如果 capability 混多个 control intent
+→ 明确要求拆分</pre><p>这不是 MCP SDK 必需代码，而是我们故意保留的<b>架构决策检查</b>：接入新 server 前先问“这个东西到底该由谁控制”。</p></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>MCP Server 暴露了一个 `delete_repository` tool，最正确的理解是？</h4><button class="option" data-feedback="协议发现不等于授权。">A. 模型连接后天然可以调用</button><button class="option" data-correct="1">B. Host 知道 server 有这个能力，但仍应由应用策略决定是否向当前模型暴露/是否需要审批</button><button class="option" data-feedback="MCP 不替代 Agent runtime。">C. 这个 tool 会自动变成 LangGraph node 并获得 checkpoint</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① Host/Client/Server 各负责什么？② Tool/Resource/Prompt 为什么不只是三种 API endpoint？③ MCP 是否替代 Tool Calling？④ 为什么 discovery 不等于 authorization？⑤ Resource 为什么用 URI？⑥ MCP 和 LangGraph 的边界是什么？⑦ 一个“搜索并删除文件”的万能 tool 为什么应该拆？⑧ 2026 stateless MCP 对远程部署有什么影响？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="mcp01">我能按控制权而不是按底层实现区分 Tool / Resource / Prompt</label></div></section><div class="footer">下一课：02 Build a Real MCP Server + Client。真正 list/call/read/get，不再停留在概念图。</div></main></div><script src="../assets/app.js"></script><script src="../assets/mcp-nav.js"></script><script src="../assets/mcp12.js"></script></body></html>
