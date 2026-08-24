@@ -1,25 +1,21 @@
-# Research Assistant v3.0
+# Research Assistant v3.2
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-Python closed at **Research Agent Lite v1.0**. LLM Application Engineering upgraded the same codebase to **Research Assistant v2.0**. The RAG track now closes at **Research Assistant v3.0**.
+Python closed at **Research Agent Lite v1.0**. LLM Application Engineering upgraded the same codebase to **Research Assistant v2.0**. RAG closed at **Research Assistant v3.0**. The Agent track now evolves the same project toward v4.0.
 
-Current project level: **v3.0**.
+Current project level: **v3.2**.
 
-## RAG increments
+## RAG foundation already inside
 
-- **v2.1** — `Document` / `DocumentBlock` / `DocumentParser`; structure, reading order and provenance are explicit
-- **v2.2** — `ChunkPolicy` / `Chunk` / `StructureAwareChunker`; heading context, tables, overlap and stable ids
-- **v2.3** — `EmbeddingProvider` / `EmbeddingService` / `EmbeddingRecord`; model id, dimension and normalization are part of the vector-space contract
-- **v2.4** — `VectorIndex`, `ExactVectorIndex`, educational `ApproximateGraphIndex`; exact search is the correctness baseline for ANN recall
-- **v2.5** — `BM25Index`, `RankedHit`, `HybridHit`, `reciprocal_rank_fusion`; lexical exact-match and dense ranking can be fused without assuming score calibration
-- **v2.6** — `Reranker`, `RerankCandidate`, `RerankHit`, `RerankService`; first-stage rank and rerank score remain separately observable
-- **v2.7** — `QueryStrategy`, `SearchQuery`, `QueryPlan`, `QueryPlanner`; original user query remains immutable while retrieval queries and synthesis needs are explicit
-- **v2.8** — `EvidenceCandidate`, `EvidenceItem`, `EvidencePack`, `CitationRef`, `EvidencePacker`; token budget, per-source cap, near-duplicate suppression and provenance-derived citations are explicit
-- **v2.9** — `RetrievalEvalCase`, `RetrievalRun`, `RetrievalEvaluator`, `RetrievalEvalReport`; Precision@K, Recall@K, Hit Rate, MRR, nDCG and tag-level slices are computed offline
-- **v3.0** — `RAGEvalCase`, `RAGTrace`, `ClaimResult`, `RAGEvaluator`; retrieval coverage, evidence coverage, grounded-claim rate, citation correctness/completeness and earliest failure layer are explicit
+The v3.0 baseline already contains structured document ingestion, chunking, embedding/index boundaries, BM25 + hybrid retrieval, reranking, query planning, evidence packing/citation provenance, retrieval metrics and end-to-end RAG failure diagnosis.
 
-The project stays offline-first so architecture and tests remain deterministic. `DeterministicToyEmbeddingProvider`, `ApproximateGraphIndex`, `KeywordOverlapReranker`, and `RuleBasedTeachingQueryPlanner` are deliberately teaching implementations, not production semantic embedding, HNSW, cross-encoder, or LLM query-planning claims.
+## Agent increments
+
+- **v3.1** — `DecisionKind`, `AgentDecision`, `AgentObservation`, `AgentContext`, `AgentTraceEvent`, `AgentRunResult`, `DecisionMaker`, `AgentLoop`; tool results become observations that feed the next decision instead of ending a fixed workflow
+- **v3.2** — `RunStatus`, `StopReason`, `RunBudget`, `AgentControlState`, `LoopGuard`; max steps, tool-call budget, failure budget and repeated-action limits are enforced outside the model
+
+`ScriptedDecisionMaker` remains a deterministic teaching adapter. It exists so the control loop can be tested offline; it is not presented as a production planner or reasoning model.
 
 ## Run
 
@@ -32,38 +28,30 @@ python -m app.main "RAG evaluation"
 pytest -q
 ```
 
-## RAG structure
+## Agent structure
 
 ```text
 app/
-├── documents.py         # v2.1 structured ingestion
-├── chunking.py          # v2.2 retrieval-unit policy
-├── embeddings.py        # v2.3 embedding boundary
-├── vector_index.py      # v2.4 exact + educational ANN
-├── lexical.py           # v2.5 BM25 + RRF hybrid fusion
-├── reranking.py         # v2.6 reranker contract
-├── query_planning.py    # v2.7 rewrite / multi-query / decomposition plan
-├── evidence.py          # v2.8 evidence packing + citation provenance
-├── retrieval_eval.py    # v2.9 ranking metrics + slice reports
-├── rag_eval.py          # v3.0 end-to-end RAG failure taxonomy
-├── multimodal.py        # AssetRef / SourceRef provenance foundation
-├── context.py           # context selection / budgeting
+├── agent_loop.py        # v3.1 observe / decide / act / update loop
+├── agent_control.py     # v3.2 run status, budgets, stop reasons, loop guard
+├── tools.py             # ToolRegistry / ToolExecutor permission boundary
+├── rag_eval.py          # v3.0 RAG failure taxonomy reused by Agent eval later
 ├── evals.py             # reusable regression gate
 └── ...
 
 tests/
-├── test_documents_chunking.py
-├── test_embeddings_vector_index.py
-├── test_lexical_reranking.py
-├── test_query_evidence.py
-├── test_retrieval_rag_eval.py
+├── test_agent_loop_control.py
 └── ...
 ```
 
-## Why v3.0 matters
+## Why Tool Calling and Agent Loop stay separate
 
-The project can now distinguish four very different failures that all look like “the RAG answer was bad” from the outside: the required evidence was never retrieved; it was retrieved but dropped during packing; it reached generation but the claim was unsupported; or the claim was grounded but its citation was missing/invalid. This is the boundary needed before adding a more autonomous Agent loop.
+A model proposing a `ToolCall` is not itself the control loop. `AgentLoop` decides when to ask for another decision after an observation, while `ToolExecutor` still owns validation, permission checks and real execution. This keeps model autonomy bounded by application-side controls.
+
+## Why LoopGuard is application-side
+
+A prompt can ask the model not to repeat itself, but it cannot be the only hard boundary. `LoopGuard` can independently terminate a run when step/tool/failure/repetition budgets are exhausted, even if the model keeps proposing another action.
 
 ## Next step
 
-Agent Engineering can now reuse the same Tool, RAG and Eval layers while adding an explicit observe → decide → act → update-state → stop/continue loop, memory policy, planning, guardrails and human approval.
+Agent 03–04 will add explicit planning/replanning and memory write/read policy. Planning will build on the stop/progress signals introduced here instead of assuming every long task should blindly follow one initial plan.
