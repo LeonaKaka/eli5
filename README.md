@@ -29,15 +29,15 @@ Agent loop → state/budgets → planning → memory → tool orchestration → 
 
 Full scope: `docs/agent-roadmap.md`.
 
-### LangChain / LangGraph — 6/10 live
+### LangChain / LangGraph — 8/10 live
 - 01 LangChain vs LangGraph / abstraction ladder / `create_agent` vs custom `StateGraph` ✅
 - 02 `StateGraph` core / State / Node / Edge / Reducer / conditional routing / compile ✅
 - 03 LangChain `@tool` / `ToolNode` / `ToolMessage` / `tools_condition` / Agent Loop ✅
 - 04 Conditional Flow / `Command` / `Send` / dynamic fan-out / reducer fan-in ✅
 - 05 Persistence / Threads / Checkpointers / `get_state` / history / replay / `update_state` ✅
 - 06 `interrupt()` / Human-in-the-loop / `Command(resume=...)` / replay-safe side effects ✅
-- 07 Memory / Store
-- 08 Subgraphs / Multi-Agent / Handoff
+- 07 Store / namespace / Runtime context / cross-thread long-term memory / write policy ✅
+- 08 Subgraphs / shared vs private state / persistence modes / `Command.PARENT` handoff ✅
 - 09 Middleware / Streaming / Observability
 - 10 Production LangGraph Architecture
 
@@ -54,7 +54,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and the LangChain / LangGraph track now evolves it toward **Research Assistant v5.0**. Current project level: **v4.6**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and the LangChain / LangGraph track now evolves it toward **Research Assistant v5.0**. Current project level: **v4.8**.
 
 ```bash
 cd projects/research-agent-lite
@@ -68,16 +68,18 @@ Current framework dependencies track the current major lines used by the lessons
 
 ## Current LangChain / LangGraph increments
 
-- v4.1 — first real compiled `StateGraph`, mapping manual Agent concepts onto framework execution without a model provider
-- v4.2 — typed graph state, partial node updates, append reducers, fixed edges and conditional routing
-- v4.3 — real LangChain tool schema + LangGraph `ToolNode` / `tools_condition`; deterministic model node emits genuine `AIMessage.tool_calls`, and Tool results return as correlated `ToolMessage` objects
-- v4.4 — `Command(update + goto)` plus `Send` dynamic map-reduce, reducer-based fan-in and explicit dynamic worker state
-- v4.5 — real `InMemorySaver` checkpointer, `thread_id`, `StateSnapshot`, `get_state()`, `get_state_history()` and `update_state()` semantics
-- v4.6 — real `interrupt()` + `Command(resume=...)` HITL graphs, with an executable unsafe demo proving that code before an interrupt can replay when the node restarts
+- v4.1 — first real compiled `StateGraph`
+- v4.2 — typed graph state, partial updates, reducers and conditional routing
+- v4.3 — real `@tool` + `ToolNode` + correlated `ToolMessage`
+- v4.4 — `Command(update + goto)` + `Send` dynamic map-reduce and reducer fan-in
+- v4.5 — `InMemorySaver`, `thread_id`, StateSnapshot/history/update-state semantics
+- v4.6 — `interrupt()` + `Command(resume=...)`, including an executable unsafe replay example
+- v4.7 — real `InMemoryStore`, Runtime context, namespaced cross-thread memory, existing `MemoryWritePolicy` gate and explicit invalidation
+- v4.8 — direct shared-state subgraphs, private-state wrapper mapping, subgraph persistence modes and `Command.PARENT` sibling handoff
 
-The migration is incremental. Existing Tool authorization, RAG, approval policy, replay safety, tenant boundaries and regression gates remain application concerns unless a later lesson explicitly maps them to a framework abstraction.
+The migration remains incremental. LangGraph Store does not replace memory policy or tenant authorization. Subgraphs do not justify multi-agent by themselves; shared/private state and handoff context remain explicit contracts. `Command.PARENT` changes graph routing, but does not mean whole specialist histories should be copied across agent boundaries.
 
-`InMemorySaver` is used only for teaching/tests and does not survive a process restart. A checkpointer persists thread-scoped graph state; it is not a replacement for a product RunStore, queue lease, tenant authorization or cross-thread long-term memory. Interrupts provide durable pause/resume, but business approval policy and exact-action authorization remain application-side contracts.
+`InMemorySaver` and `InMemoryStore` are teaching/test adapters only. Persistent production deployments need durable backends and product-level tenant/run controls.
 
 ## Pages
-Deployed with GitHub Actions from the repository root. No backend or secret is required for the static learning UI. Lessons 01–06 remain provider-free: they exercise real LangGraph APIs without requiring an external model key.
+Deployed with GitHub Actions from the repository root. No backend or secret is required for the static learning UI. Lessons 01–08 remain provider-free: they exercise real LangGraph APIs without requiring an external model key.
