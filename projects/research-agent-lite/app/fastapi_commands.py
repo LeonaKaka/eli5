@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from threading import RLock
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException, status
 
@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 class IdempotentCommandResult:
     payload: dict[str, Any]
     etag: str
+    replayed: bool = False
 
 
 @dataclass(frozen=True)
@@ -28,46 +29,25 @@ class InMemoryIdempotencyStore:
     same fingerprint replays the original response. Reusing the same key for a
     different command is a conflict.
 
-    This is process-local. Production needs durable storage with retention and
-    atomic create-if-absent semantics shared by all API replicas.
+    ``execute_once`` keeps lookup, execution and record creation in one critical
+    section so concurrent retries in this single teaching process cannot both
+    execute the command. Production needs durable shared storage with equivalent
+    atomic reservation/create-if-absent semantics across all API replicas.
     """
 
     def __init__(self) -> None:
         self._records: dict[tuple[str, str, str], _StoredCommand] = {}
         self._lock = RLock()
 
-    def replay_or_none(
+    def execute_once(
         self,
         *,
         tenant_id: str,
         operation: str,
         idempotency_key: str,
         fingerprint: str,
-    ) -> IdempotentCommandResult | None:
-        key = (tenant_id, operation, idempotency_key)
-        with self._lock:
-            existing = self._records.get(key)
-            if existing is None:
-                return None
-            if existing.fingerprint != fingerprint:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Idempotency-Key was already used for a different command",
-                )
-            return IdempotentCommandResult(
-                payload=dict(existing.result.payload),
-                etag=existing.result.etag,
-            )
-
-    def remember(
-        self,
-        *,
-        tenant_id: str,
-        operation: str,
-        idempotency_key: str,
-        fingerprint: str,
-        result: IdempotentCommandResult,
-    ) -> None:
+        execute: Callable[[], IdempotentCommandResult],
+    ) -> IdempotentCommandResult:
         key = (tenant_id, operation, idempotency_key)
         with self._lock:
             existing = self._records.get(key)
@@ -77,14 +57,23 @@ class InMemoryIdempotencyStore:
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Idempotency-Key was already used for a different command",
                     )
-                return
+                return IdempotentCommandResult(
+                    payload=dict(existing.result.payload),
+                    etag=existing.result.etag,
+                    replayed=True,
+                )
+
+            result = execute()
+            stored = IdempotentCommandResult(
+                payload=dict(result.payload),
+                etag=result.etag,
+                replayed=False,
+            )
             self._records[key] = _StoredCommand(
                 fingerprint=fingerprint,
-                result=IdempotentCommandResult(
-                    payload=dict(result.payload),
-                    etag=result.etag,
-                ),
+                result=stored,
             )
+            return stored
 
 
 def normalize_idempotency_key(raw: str) -> str:
