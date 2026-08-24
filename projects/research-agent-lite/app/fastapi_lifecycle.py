@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthCheck(BaseModel):
@@ -15,7 +15,7 @@ class HealthCheck(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-    checks: list[HealthCheck] = []
+    checks: list[HealthCheck] = Field(default_factory=list)
 
 
 @dataclass
@@ -89,7 +89,7 @@ class RuntimeResourceManager:
 
     async def close(self) -> None:
         for dependency in reversed(tuple(self._deps.values())):
-            if dependency.started or not dependency.closed:
+            if dependency.started:
                 await dependency.close()
         self.started = False
         self.closed = True
@@ -105,7 +105,7 @@ class RuntimeResourceManager:
     def live(self) -> HealthResponse:
         # If this endpoint can execute, the process/event loop is alive enough to
         # answer. External dependency failures must not turn liveness red.
-        return HealthResponse(status="live", checks=[])
+        return HealthResponse(status="live")
 
     def readiness(self) -> HealthResponse:
         checks = [
