@@ -5,3 +5,32 @@ const fileInfo={main:['app/main.py','只负责启动和把最外层组件接起�
 if($('#roleLab')){const cases=[{code:'def parse_pdf(path: str):\n    ...',answer:'tools',why:'PDF 解析是一个可复用能力，最自然放 tools/。'},{code:'class SearchRequest(BaseModel):\n    query: str\n    top_k: int = 5',answer:'models',why:'它定义数据形状，不执行业务行为。'},{code:'def choose_next_step(state):\n    ...',answer:'agents',why:'“下一步做什么”属于高层编排/决策。'},{code:'class OpenAIClient:\n    def complete(...): ...',answer:'services',why:'这是对外部供应商服务的 client 封装。'}];let idx=0;const show=()=>{$('#roleSnippet').textContent=cases[idx].code;$('#roleResult').className='result';$('#roleResult').innerHTML='<b>先选一个目录。</b><p>判断它是在决定流程、执行能力、定义数据，还是封装外部服务。</p>'};$$('[data-role-choice]').forEach(btn=>btn.addEventListener('click',()=>{const c=cases[idx],out=$('#roleResult'),choice=btn.dataset.roleChoice;out.className='result '+(choice===c.answer?'ok':'err');out.innerHTML=(choice===c.answer?'<b>✅ 对</b>':'<b>❌ 再想一下</b>')+'<p>'+c.why+'</p>'+(choice===c.answer?'<button class="btn primary" id="nextRole">下一题</button>':'');const next=$('#nextRole');if(next)next.addEventListener('click',()=>{idx=(idx+1)%cases.length;show()})}));show()}
 
 if($('#sendHttp')){let failure=false;$('#httpScenario').addEventListener('click',()=>{failure=!failure;$('#httpScenario').textContent=failure?'当前：429 场景':'切换失败场景'});$('#sendHttp').addEventListener('click',()=>{const trace=$('#httpTrace'),method=$('#httpMethod').value,url=$('#httpUrl').value;let body;try{body=JSON.parse($('#httpBody').value)}catch(e){trace.innerHTML='<span class="badline">❌ JSON Parse Error</span>\n'+escapeHtml(e.message);return}const lines=[];lines.push('<span class="muteline">① build request</span>');lines.push(method+' '+escapeHtml(url));lines.push('Content-Type: application/json');lines.push('body = '+escapeHtml(JSON.stringify(body)));lines.push('');lines.push('<span class="muteline">② send over network...</span>');lines.push('');if(failure){lines.push('<span class="badline">③ HTTP 429 Too Many Requests</span>');lines.push('{"error":"rate_limit"}');lines.push('');lines.push('<span class="badline">→ 不能当正常业务数据继续处理</span>');lines.push('→ 读取限制信息 / 等待 / 有限重试')}else{lines.push('<span class="okline">③ HTTP 200 OK</span>');lines.push('{"items":["paper A","paper B"],"took_ms":84}');lines.push('');lines.push('<span class="okline">④ response.json() → Python dict</span>');lines.push('→ 再交给 Pydantic / Agent')}trace.innerHTML=lines.join('\n')})}
+
+(function syncPythonSidebar(){
+  const match=location.pathname.match(/\/python\/([^/]+\.html)$/);
+  if(!match)return;
+  const nav=document.querySelector('.sidebar .nav');
+  if(!nav)return;
+  const current=match[1];
+  const lessons=[
+    ['01','01-basics.html','数据积木与执行'],
+    ['02','02-types-pydantic.html','函数与数据契约'],
+    ['03','03-project-structure.html','Module / Package'],
+    ['04','04-http-json-api.html','HTTP / JSON / API'],
+    ['05','05-async-await.html','async / await'],
+    ['06','06-failure-engineering.html','Failure Engineering'],
+    ['07','07-object-state.html','Object / State'],
+    ['08','08-testing-project.html','Testing + v1.0']
+  ];
+  nav.innerHTML='<a href="../"><span class="num">⌂</span>课程首页</a>'+lessons.map(([n,file,label])=>'<a href="'+file+'" class="'+(file===current?'active':'')+'"><span class="num">'+n+'</span>'+label+'</a>').join('');
+
+  const progressBox=document.querySelector('.sidebar .progress-box');
+  const renderPythonProgress=()=>{
+    if(!progressBox)return;
+    const done=lessons.reduce((count,[n])=>count+(localStorage.getItem('eli5:python'+n)==='1'?1:0),0);
+    const pct=Math.round(done/lessons.length*100);
+    progressBox.innerHTML='<div class="progress-row"><span>Python 学习进度</span><span>'+done+' / '+lessons.length+'</span></div><div class="progress"><i style="width:'+pct+'%"></i></div>';
+  };
+  renderPythonProgress();
+  document.querySelectorAll('[data-progress]').forEach(box=>box.addEventListener('change',renderPythonProgress));
+})();
