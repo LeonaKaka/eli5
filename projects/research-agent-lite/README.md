@@ -1,36 +1,21 @@
-# Research Assistant v2.0
+# Research Assistant v2.2
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-The eight Python lessons closed at **Research Agent Lite v1.0**. The ten LLM Application Engineering lessons then upgraded the same codebase into **Research Assistant v2.0** instead of starting a new demo.
+The eight Python lessons closed at **Research Agent Lite v1.0**. The ten LLM Application Engineering lessons upgraded the same codebase into **Research Assistant v2.0**. The RAG track now keeps evolving that project instead of starting another demo.
 
-Current project level: **v2.0**.
+Current project level: **v2.2**.
 
-## What Python v1.0 demonstrates
+## What is already inside
 
-- Pydantic request/response models
-- modules and package boundaries
-- async concurrent I/O-style work
-- transient vs permanent failures
-- bounded retry and partial results
-- dataclass state
-- composition / dependency injection
-- pytest unit and integration-style tests
+Python + LLM layers provide validated boundaries, async execution, retry/fallback, state, structured outputs, streaming state, tool permission, asset provenance, model routing and regression gates.
 
-## LLM increments
+## RAG increments
 
-- **v1.1** — model API / provider boundary concepts
-- **v1.2** — conversation state and history strategy
-- **v1.3** — `ContextBuilder`, token-budget-aware selection, injectable token estimator
-- **v1.4** — semantic `GenerationProfile` objects for task-specific generation/reasoning intent
-- **v1.5** — `StreamState`, `StreamResult`, `StreamCollector`; partial output is not automatically final
-- **v1.6** — `PaperAssessment` / `StructuredResult`; Pydantic validation and explicit refusal state
-- **v1.7** — `ToolCall`, `ToolRegistry`, `ToolExecutor`; arguments are validated and side effects require explicit approval
-- **v1.8** — `AssetRef`, `SourceRef`, `PreparedAsset`, `AssetPipeline`; file policy and page/timestamp provenance are explicit
-- **v1.9** — `ModelRouter`; capability gates happen before weighted quality/cost/latency/reliability ranking
-- **v2.0** — `EvalCase`, `EvalReport`, `RegressionGate`; critical-slice regressions can block release even when the average improves
+- **v2.1** — `BlockType`, `DocumentBlock`, `Document`, `DocumentParser`; parsed content has explicit reading order, block type and `SourceRef` provenance
+- **v2.2** — `ChunkPolicy`, `Chunk`, `StructureAwareChunker`; heading context, atomic tables, overlap, stable ids and policy version are explicit
 
-The project remains offline-first: no API key is required. The goal is to make architecture, contracts and failure behavior deterministic before mapping them onto a real provider SDK.
+The project remains offline-first so architecture and tests stay deterministic. Real parser/embedding/vector-store adapters arrive only after the core interfaces are clear.
 
 ## Run
 
@@ -47,20 +32,22 @@ pytest -q
 
 ```text
 app/
-├── models.py       # validated boundary models
-├── state.py        # internal AgentState dataclass
-├── errors.py       # error taxonomy
-├── sources.py      # PaperSource protocol + demo adapters
-├── agent.py        # orchestration, concurrency, retry, partial result
-├── context.py      # context selection + token budgeting
-├── generation.py   # provider-neutral generation profiles
-├── streaming.py    # stream state + partial/final semantics
-├── structured.py   # structured-output contracts
-├── tools.py        # tool schema / permission / execution boundary
-├── multimodal.py   # asset policy, preparation and provenance
-├── routing.py      # capability gate + explainable model routing
-├── evals.py        # eval reports + regression gate
-└── main.py         # CLI entrypoint
+├── models.py
+├── state.py
+├── errors.py
+├── sources.py
+├── agent.py
+├── context.py
+├── generation.py
+├── streaming.py
+├── structured.py
+├── tools.py
+├── multimodal.py
+├── routing.py
+├── evals.py
+├── documents.py     # v2.1 structured document ingestion model
+├── chunking.py      # v2.2 structure-aware chunk policy
+└── main.py
 
 tests/
 ├── test_state.py
@@ -68,13 +55,14 @@ tests/
 ├── test_context_generation.py
 ├── test_streaming_structured.py
 ├── test_tools_multimodal.py
-└── test_routing_evals.py
+├── test_routing_evals.py
+└── test_documents_chunking.py
 ```
 
-## Why these modules remain provider-neutral
+## Why parsing and chunking are separate
 
-The project teaches durable engineering boundaries rather than one SDK's current parameter names. A later real provider adapter can map tokenization, reasoning controls, stream events, tool schemas, file inputs and usage accounting onto the chosen provider while keeping the application contracts testable.
+`DocumentParser` converts an asset into a stable document model with structure and provenance. `StructureAwareChunker` consumes that model and decides retrieval units. This keeps parser replacement independent from chunking experiments and makes downstream retrieval evaluation meaningful.
 
 ## Next step
 
-The next course track is RAG. It can reuse `AssetRef`, `SourceRef`, `ContextBuilder`, structured outputs, routing and evals while adding parsing, chunking, embeddings, retrieval, hybrid search, reranking and citation-quality evaluation.
+RAG 03–04 will add embedding boundaries and a vector-index abstraction, then teach exact search vs ANN/HNSW before any specific vector database becomes the center of the design.
