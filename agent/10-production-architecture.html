@@ -1,5 +1,5 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent 10 · Production Architecture</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/agent12.css"><link rel="stylesheet" href="../assets/agent910.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Agent<small>Autonomous Systems Engineering</small></div><div class="nav-label">Agent</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
-<section class="hero"><span class="kicker">Agent 10 · Research Assistant v4.0</span><h1>Production Agent 不是把 while-loop 放进 FastAPI。<br>它是一套可持久化、可排队、可取消、可恢复的 Run System。</h1><p class="lead">前九课已经有 AgentLoop、Budget、Plan、Memory、Tool DAG、Approval、Checkpoint、Handoff 和 Trajectory Eval。最后一步不是再加 autonomy，而是把这些能力放进一个明确的生产边界：<b>请求快速入队，Run 状态持久化，Worker 可重启，Job 可重复投递但不能重复执行旧 revision，审批/取消都能跨进程继续。</b></p></section>
+<section class="hero"><span class="kicker">Agent 10 · Research Assistant v4.0</span><h1>Production Agent 不是把 while-loop 放进 FastAPI。<br>它是一套可持久化、可排队、可取消、可恢复的 Run System。</h1><p class="lead">前九课已经有 AgentLoop、Budget、Plan、Memory、Tool DAG、Approval、Checkpoint、Handoff 和 Trajectory Eval。最后一步不是再加 autonomy，而是把这些能力放进一个明确的生产边界：<b>请求快速入队，Run 状态持久化，Worker 可重启，Queue 可重复投递但旧 revision 不能执行，孤儿 Worker 可被 watchdog 恢复，审批/取消都能跨进程继续。</b></p></section>
 <section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>为什么不能直接在 HTTP Request 里跑 20 分钟 Agent？</h2><div class="sub">Web 请求生命周期和 Agent run 生命周期不是同一个东西。</div></div></div><div class="grid2"><div class="card"><b>❌ Request-bound Agent</b><pre>POST /research
   ↓
 while agent_running:
@@ -7,12 +7,12 @@ while agent_running:
   await model(...)
   ... 20 min ...</pre><p>连接断开、进程部署、超时、worker 重启都会让状态非常难处理。</p></div><div class="card"><b>✅ Run-oriented system</b><pre>POST /runs
   ↓
-create RunRecord
+create RunRecord(status=QUEUED)
   ↓
 enqueue START
   ↓
 202 + run_id</pre><p>真正长任务交给 worker；客户端按 run_id 查询/订阅状态。</p></div></div><div class="callout"><b>API 负责创建和控制 run，不负责绑住一个进程直到任务结束。</b>这也是后面 FastAPI 课程会真正接上的地方。</div></section>
-<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Interactive：Production Runtime Lab</h2><div class="sub">切换五种生产事件，看不同组件各自处理什么。</div></div></div><div class="runtime-lab"><div class="runtime-tabs"><button class="btn active" data-runtime="normal">正常完成</button><button class="btn" data-runtime="duplicate">Queue 重复投递</button><button class="btn" data-runtime="crash">Worker crash</button><button class="btn" data-runtime="approval">等待审批</button><button class="btn" data-runtime="cancel">用户取消</button></div><div class="runtime-architecture"><div id="rtApi" class="runtime-node"><b>API</b><small>create / status / cancel / approve</small></div><div id="rtStore" class="runtime-node"><b>Run Store</b><small>tenant / status / revision / budget</small></div><div id="rtQueue" class="runtime-node"><b>Queue</b><small>START / RESUME jobs</small></div><div id="rtWorker" class="runtime-node"><b>Worker</b><small>claim revision / execute</small></div><div id="rtAgent" class="runtime-node"><b>Agent Runtime</b><small>checkpoint / tool / approval / trace</small></div></div><div class="runtime-state"><div class="runtime-stat"><span>run status</span><b id="rtStatus">—</b></div><div class="runtime-stat"><span>revision</span><b id="rtRevision">—</b></div><div class="runtime-stat"><span>queue decision</span><b id="rtJob">—</b></div><div class="runtime-stat"><span>approval</span><b id="rtApproval">—</b></div></div><div class="runtime-log" id="runtimeLog"></div></div><div class="callout warn"><b>重点试“Queue 重复投递”。</b>生产消息队列常常更接近 at-least-once，而不是童话式 exactly-once；因此 Worker 必须靠 run revision / checkpoint / idempotency contract 判断“这份 job 还有效吗”。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Interactive：Production Runtime Lab</h2><div class="sub">切换五种生产事件，看不同组件各自处理什么。</div></div></div><div class="runtime-lab"><div class="runtime-tabs"><button class="btn active" data-runtime="normal">正常完成</button><button class="btn" data-runtime="duplicate">Queue 重复投递</button><button class="btn" data-runtime="crash">Worker crash</button><button class="btn" data-runtime="approval">等待审批</button><button class="btn" data-runtime="cancel">用户取消</button></div><div class="runtime-architecture"><div id="rtApi" class="runtime-node"><b>API</b><small>create / status / cancel / approve</small></div><div id="rtStore" class="runtime-node"><b>Run Store</b><small>tenant / status / revision / budget</small></div><div id="rtQueue" class="runtime-node"><b>Queue</b><small>START / RESUME jobs</small></div><div id="rtWorker" class="runtime-node"><b>Worker</b><small>claim revision / execute</small></div><div id="rtAgent" class="runtime-node"><b>Agent Runtime</b><small>checkpoint / tool / approval / trace</small></div></div><div class="runtime-state"><div class="runtime-stat"><span>run status</span><b id="rtStatus">—</b></div><div class="runtime-stat"><span>revision</span><b id="rtRevision">—</b></div><div class="runtime-stat"><span>queue decision</span><b id="rtJob">—</b></div><div class="runtime-stat"><span>approval</span><b id="rtApproval">—</b></div></div><div class="runtime-log" id="runtimeLog"></div></div><div class="callout warn"><b>重点试“Queue 重复投递”和“Worker crash”。</b>Queue 更接近 at-least-once；Worker 还可能在 claim 后死亡。因此生产控制面同时需要 revision/CAS 和 lease/heartbeat/watchdog：旧 delivery、旧 Worker 都不能覆盖新状态。</div></section>
 <section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>RunRecord 是系统真相，不是聊天 history</h2><div class="sub">控制面状态必须独立于模型上下文。</div></div></div><pre>RunRecord(
     id="run-42",
     tenant_id="team-a",
@@ -25,20 +25,27 @@ enqueue START
     approval_request_id="approval:call-3",
     owner_agent="supervisor",
 )</pre><div class="callout">Conversation/messages 可以重建模型 context，但不能替代 authoritative run state。Worker 到底能不能执行、谁是 owner、是不是已取消，都应该从控制面读取。</div></section>
-<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Revision / CAS：避免两个 Worker 同时把同一个 Run 往前推</h2><div class="sub">这是比“加一个 Redis lock”更基本的并发思维。</div></div></div><pre>job.expected_revision = 5
-
-store current revision = 5
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Revision / CAS：不仅防重复 Job，还防“死而复生”的旧 Worker</h2><div class="sub">claim 得到的 revision 就是一个 optimistic worker token。</div></div></div><pre>START job expected_revision = 5
+store revision = 5
 → worker A claim
-→ update RUNNING revision = 6
+→ RUNNING revision = 6
 
-同一 job 再投递给 worker B
-expected = 5
-current  = 6
-→ ❌ stale delivery</pre><div class="callout"><b>v4.0 teaching store 用 optimistic revision 检查。</b>生产可以用数据库事务、compare-and-swap、lease 等实现，但语义不能丢：旧 job 不能重新激活已经前进的 run。</div></section>
-<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Cancellation 也是状态，不是“杀掉 Python task 就完了”</h2><div class="sub">外部 Tool 可能已经在执行。</div></div></div><div class="flow"><div class="node">User cancel</div><span class="arrow">→</span><div class="node">RunStore<br>CANCELLED</div><span class="arrow">→</span><div class="node">Worker safe boundary</div><span class="arrow">→</span><div class="node">Stop next action</div></div><div class="callout warn"><b>取消不能自动撤销现实世界。</b>如果一个不可逆 Tool 已经 IN_FLIGHT，仍然要走 07 的 reconcile/compensation 逻辑；cancel 只是阻止系统继续推进新的动作。</div></section>
-<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Approval Resume 必须经过持久化 Run，而不是回到旧进程</h2><div class="sub">等待人 3 小时期间，原 worker 早就应该释放了。</div></div></div><div class="flow"><div class="node">Worker</div><span class="arrow">→</span><div class="node">Checkpoint</div><span class="arrow">→</span><div class="node">WAITING_APPROVAL</div><span class="arrow">→</span><div class="node">human approves exact call</div><span class="arrow">→</span><div class="node">enqueue RESUME</div></div><div class="callout">这也是“durable interrupt”的真正意义：暂停状态存在 store 里，不依赖那一个内存对象还活着。</div></section>
+同一 START 再投递
+expected = 5, current = 6
+→ ❌ stale delivery
+
+worker A 卡死
+watchdog requeue → QUEUED revision = 7
+worker B claim → RUNNING revision = 8
+
+旧 worker A 突然回来：
+finish(expected_revision=6)
+current = 8
+→ ❌ stale worker</pre><div class="callout"><b>只在 claim 时检查 revision 不够。</b>Worker 后续的 `finish / pause_for_approval / checkpoint transition` 也必须携带自己真正 claim 到的 revision，不能偷偷读取最新 revision 后覆盖别人。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Cancellation 也是状态机，不是“kill task”</h2><div class="sub">排队中的任务和正在执行副作用的任务不能用同一种取消语义。</div></div></div><div class="flow"><div class="node">RUNNING</div><span class="arrow">→</span><div class="node">cancel_requested<br>CANCELLING</div><span class="arrow">→</span><div class="node">Worker safe boundary</div><span class="arrow">→</span><div class="node">CANCELLED</div></div><p>如果 Run 还在 `QUEUED / WAITING_APPROVAL`，没有 active worker，可以直接进入 `CANCELLED`。如果已经 `RUNNING`，则先进入 `CANCELLING`，阻止新的动作；Worker 到安全边界后再 `acknowledge_cancel()`。</p><div class="callout warn"><b>取消仍然不是 rollback。</b>如果一个不可逆 Tool 已经 IN_FLIGHT，仍要走 07 的 reconcile/compensation；`CANCELLING` 只是阻止系统继续推进新动作，并诚实表示“停止还没有被 Worker 确认”。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Approval Resume 必须经过持久化 Run，而不是回到旧进程</h2><div class="sub">等待人 3 小时期间，原 worker 早就应该释放了。</div></div></div><div class="flow"><div class="node">RUNNING</div><span class="arrow">→</span><div class="node">Checkpoint</div><span class="arrow">→</span><div class="node">WAITING_APPROVAL</div><span class="arrow">→</span><div class="node">human approves exact call</div><span class="arrow">→</span><div class="node">QUEUED + RESUME</div></div><div class="callout">这才是 durable interrupt：暂停状态存在 store 里。批准后产生一个新的 `RESUME` job，由任意健康 Worker claim，而不是试图“唤醒”三小时前那个 Python coroutine。</div></section>
 <section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Tenant / Authorization 必须一路跟着 Run</h2><div class="sub">Agent 能力越强，数据边界越不能交给模型自觉。</div></div></div><div class="prod-boundaries"><div class="prod-card"><b>API boundary</b><p>调用者是谁？能创建/取消/审批哪个 run？</p></div><div class="prod-card"><b>RunStore boundary</b><p>`run_id` 查询必须同时检查 `tenant_id`，不能只凭 UUID。</p></div><div class="prod-card"><b>Tool boundary</b><p>目标资源授权在 ToolExecutor/adapter 层再次检查。</p></div><div class="prod-card"><b>Memory boundary</b><p>USER / WORKSPACE scope 参与 retrieval，而不是检索完再让模型忽略。</p></div><div class="prod-card"><b>Artifact boundary</b><p>handoff/ref 指向的数据也必须带访问控制。</p></div><div class="prod-card"><b>Trace boundary</b><p>日志里避免泄漏 secret，审计身份和动作。</p></div></div></section>
-<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>哪些组件必须从“课程内存版”换成生产基础设施？</h2><div class="sub">接口可以保留，adapter 必须替换。</div></div></div><table class="table"><tr><th>课程 baseline</th><th>生产需要</th></tr><tr><td>InMemoryRunStore</td><td>事务型持久数据库 / durable state store</td></tr><tr><td>InMemoryRunQueue</td><td>真正 queue / broker / workflow scheduler</td></tr><tr><td>InMemoryCheckpointStore</td><td>持久 checkpoint + revision/audit</td></tr><tr><td>MemoryStore</td><td>tenant-scoped persistent store + retrieval/index</td></tr><tr><td>单进程 Worker</td><td>worker pool / leases / concurrency / autoscaling</td></tr><tr><td>页面教学 trace</td><td>structured telemetry / metrics / traces / alerts</td></tr></table><div class="callout"><b>课程的价值是先把 contract 定清楚。</b>以后接 Postgres、Redis、SQS、Celery、Temporal、LangGraph 等，不应该改变“run revision / checkpoint / approval / ownership / budget”这些核心语义。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>哪些组件必须从“课程内存版”换成生产基础设施？</h2><div class="sub">接口可以保留，adapter 必须替换。</div></div></div><table class="table"><tr><th>课程 baseline</th><th>生产需要</th></tr><tr><td>InMemoryRunStore</td><td>事务型持久数据库 / durable state store</td></tr><tr><td>InMemoryRunQueue</td><td>真正 queue / broker / workflow scheduler</td></tr><tr><td>手动 requeue_abandoned()</td><td>worker lease / heartbeat / watchdog + recovery scheduler</td></tr><tr><td>InMemoryCheckpointStore</td><td>持久 checkpoint + revision/audit</td></tr><tr><td>MemoryStore</td><td>tenant-scoped persistent store + retrieval/index</td></tr><tr><td>单进程 Worker</td><td>worker pool / leases / concurrency / autoscaling</td></tr><tr><td>页面教学 trace</td><td>structured telemetry / metrics / traces / alerts</td></tr></table><div class="callout"><b>课程的价值是先把 contract 定清楚。</b>以后接 Postgres、Redis、SQS、Celery、Temporal、LangGraph 等，不应该改变 `QUEUED / revision / checkpoint / approval / ownership / budget / cancellation` 这些核心语义。</div></section>
 <section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v4.0：ProductionControlPlane</h2><div class="sub">把 Agent 从单次函数调用提升成可管理的 Run。</div></div></div><pre>control = ProductionControlPlane()
 
 run = control.submit(
@@ -46,23 +53,33 @@ run = control.submit(
     tenant_id="team-a",
     objective="compare papers",
 )
+# run.status == QUEUED
 
 job = control.queue.pop()
 claim = control.claim(job)
+worker_revision = claim.record.revision
 
 # side effect needs human
 waiting = control.pause_for_approval(
     run.id,
     tenant_id="team-a",
+    expected_revision=worker_revision,
     approval_request_id="approval:call-9",
     checkpoint_id="run-42:send-9",
 )
 
 # human resolved exact call
-control.enqueue_resume_after_approval(
+queued = control.enqueue_resume_after_approval(
     run.id,
     tenant_id="team-a",
     approval_request_id="approval:call-9",
-)</pre><div class="callout"><b>这个模块故意不执行模型本身。</b>它是 control-plane teaching baseline：RunStore / Queue / revision / cancel / approval resume 的 contract。AgentLoop、DurableActionRunner、ApprovalManager、Handoff、Trace 都在 worker/runtime 侧组合。</div></section>
-<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>Agent Engineering 10/10：你现在应该能画出这张图</h2><div class="sub">并解释每个框为什么存在。</div></div></div><div class="flow"><div class="node">Client</div><span class="arrow">→</span><div class="node">API</div><span class="arrow">→</span><div class="node">RunStore</div><span class="arrow">↔</span><div class="node">Queue</div><span class="arrow">→</span><div class="node">Worker</div></div><div class="flow"><div class="node">Worker</div><span class="arrow">→</span><div class="node">AgentLoop / Plan</div><span class="arrow">→</span><div class="node">Tool / RAG / Handoff</div><span class="arrow">→</span><div class="node">Checkpoint / Approval</div><span class="arrow">→</span><div class="node">Trace / Eval</div></div><div class="quiz" data-quiz><h4>消息队列把同一个 START job 投递了两次。生产 Agent 最安全的基本处理是什么？</h4><button class="option" data-feedback="重复消息并不代表任务应该再从头跑一次。">A. 两个 Worker 都执行，谁先完成用谁</button><button class="option" data-correct="1">B. Worker 用 run revision/lease/checkpoint 判断 job 是否仍有效，旧 delivery 必须被拒绝</button><button class="option" data-feedback="更大模型和并发一致性没有关系。">C. 换更强模型即可避免</button><div class="feedback"></div></div><div class="callout interview"><b>面试验收：</b>① 为什么长 Agent 不该绑在 HTTP request？② RunStore 为什么和 conversation history 分开？③ revision/CAS 防什么？④ Queue 重复投递如何安全处理？⑤ cancel 为什么不是自动 rollback？⑥ approval 为什么 resume 成新 job？⑦ tenant/authorization 应在哪几层检查？⑧ 哪些内存 baseline 上线前必须外置？⑨ 你会怎么把前九课组合成 worker runtime？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="agent10">我能设计一个可排队、可持久化、可取消、可恢复、可审计的 Production Agent Runtime</label></div></section>
+)
+# queued.status == QUEUED; a RESUME job now exists</pre><p>如果 Worker 本身崩掉，则由 lease/watchdog 判定 abandoned 后：</p><pre>queued = control.requeue_abandoned(
+    run.id,
+    tenant_id="team-a",
+    expected_revision=worker_revision,
+    checkpoint_id="run-42:checkpoint-7",
+)
+# old worker_revision becomes stale immediately</pre><div class="callout"><b>这个模块故意不执行模型本身。</b>它是 control-plane teaching baseline：RunStore / Queue / revision / cancel / watchdog-requeue / approval resume 的 contract。AgentLoop、DurableActionRunner、ApprovalManager、Handoff、Trace 都在 worker/runtime 侧组合。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>Agent Engineering 10/10：你现在应该能画出这张图</h2><div class="sub">并解释每个框为什么存在。</div></div></div><div class="flow"><div class="node">Client</div><span class="arrow">→</span><div class="node">API</div><span class="arrow">→</span><div class="node">RunStore</div><span class="arrow">↔</span><div class="node">Queue</div><span class="arrow">→</span><div class="node">Worker Pool</div></div><div class="flow"><div class="node">Lease / Watchdog</div><span class="arrow">→</span><div class="node">Checkpoint / Resume</div><span class="arrow">→</span><div class="node">AgentLoop / Plan</div><span class="arrow">→</span><div class="node">Tool / RAG / Handoff</div><span class="arrow">→</span><div class="node">Trace / Eval</div></div><div class="quiz" data-quiz><h4>消息队列把同一个 START job 投递了两次，且第一个 Worker 后来卡死又突然恢复。最关键的控制是什么？</h4><button class="option" data-feedback="谁先写成功会导致不可预测的重复执行和状态覆盖。">A. 两个 Worker 都执行，谁先完成用谁</button><button class="option" data-correct="1">B. Job 和 Worker 状态提交都绑定 run revision/lease；旧 delivery 和 stale worker 必须被拒绝</button><button class="option" data-feedback="模型能力和并发一致性是两件事。">C. 换更强模型即可避免</button><div class="feedback"></div></div><div class="callout interview"><b>面试验收：</b>① 为什么长 Agent 不该绑在 HTTP request？② QUEUED 和 PAUSED 为什么不同？③ RunStore 为什么和 conversation history 分开？④ revision/CAS 如何同时防 duplicate job 和 stale worker？⑤ lease/watchdog 解决什么？⑥ running cancel 为什么先 CANCELLING？⑦ approval 为什么 resume 成新 job？⑧ tenant/authorization 应在哪几层检查？⑨ 哪些内存 baseline 上线前必须外置？⑩ 你会怎么把前九课组合成 worker runtime？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="agent10">我能设计一个可排队、可持久化、可取消、可恢复、可审计的 Production Agent Runtime</label></div></section>
 <div class="footer">Agent Engineering 10/10 完成。下一条能力线：LangChain / LangGraph——现在再学图框架，你会知道每一个 State / Node / Edge / Checkpoint / Interrupt 到底在替你解决什么。</div></main></div><script src="../assets/app.js"></script><script src="../assets/agent-nav.js"></script><script src="../assets/agent910.js"></script></body></html>
