@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from enum import StrEnum
-from typing import Protocol
+from typing import Awaitable, Protocol
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -75,7 +75,7 @@ class AgentRunResult(BaseModel):
 
 
 class DecisionMaker(Protocol):
-    def decide(self, context: AgentContext) -> AgentDecision: ...
+    def decide(self, context: AgentContext) -> AgentDecision | Awaitable[AgentDecision]: ...
 
 
 class AgentLoop:
@@ -126,11 +126,6 @@ class AgentLoop:
             call = decision.tool_call
             assert call is not None
             fingerprint = action_fingerprint(call)
-            reason = self.guard.before_tool(context.control, fingerprint)
-            if reason is not None:
-                return self._stop(context, reason)
-
-            context.control.status = RunStatus.WAITING_TOOL
             context.trace.append(
                 AgentTraceEvent(
                     step=step,
@@ -139,6 +134,11 @@ class AgentLoop:
                 )
             )
 
+            reason = self.guard.before_tool(context.control, fingerprint)
+            if reason is not None:
+                return self._stop(context, reason)
+
+            context.control.status = RunStatus.WAITING_TOOL
             result = await self.tool_executor.execute(call, approved=approved)
             context.control.tool_calls += 1
             context.control.action_fingerprints.append(fingerprint)
