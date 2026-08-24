@@ -141,6 +141,11 @@ class DurableActionRunner:
     def recovery_decision(self, checkpoint_id: str) -> RecoveryDecision:
         checkpoint = self.store.get(checkpoint_id)
         stage = checkpoint.stage
+        replay_safe = checkpoint.action.replay_safety in {
+            ReplaySafety.SAFE,
+            ReplaySafety.EXTERNAL_IDEMPOTENT,
+        }
+
         if stage is CheckpointStage.COMMITTED:
             return RecoveryDecision(
                 action=RecoveryAction.REUSE_COMMITTED,
@@ -154,33 +159,34 @@ class DurableActionRunner:
                 checkpoint=checkpoint,
             )
         if stage is CheckpointStage.IN_FLIGHT:
-            if checkpoint.action.replay_safety in {
-                ReplaySafety.SAFE,
-                ReplaySafety.EXTERNAL_IDEMPOTENT,
-            }:
+            if replay_safe:
                 return RecoveryDecision(
                     action=RecoveryAction.RETRY,
-                    reason=(
-                        "the outcome is ambiguous, but the action contract says replay is safe"
-                    ),
+                    reason="the outcome is ambiguous, but the action replay contract permits another attempt",
                     checkpoint=checkpoint,
                 )
             return RecoveryDecision(
                 action=RecoveryAction.RECONCILE,
-                reason=(
-                    "the action may already have produced a side effect; inspect the external system before replay"
-                ),
+                reason="the action may already have produced a side effect; inspect the external system before replay",
                 checkpoint=checkpoint,
             )
         if stage is CheckpointStage.FAILED:
             retryable = bool(checkpoint.result and checkpoint.result.error and checkpoint.result.error.retryable)
+            if retryable and replay_safe:
+                return RecoveryDecision(
+                    action=RecoveryAction.RETRY,
+                    reason="the failure is retryable and the action contract permits safe replay",
+                    checkpoint=checkpoint,
+                )
+            if retryable and not replay_safe:
+                return RecoveryDecision(
+                    action=RecoveryAction.RECONCILE,
+                    reason="the transport failure is retryable, but a non-idempotent side effect may already have happened",
+                    checkpoint=checkpoint,
+                )
             return RecoveryDecision(
-                action=RecoveryAction.RETRY if retryable else RecoveryAction.RECONCILE,
-                reason=(
-                    "the recorded failure is explicitly retryable"
-                    if retryable
-                    else "the failure is recorded but not safely retryable without reconciliation"
-                ),
+                action=RecoveryAction.RECONCILE,
+                reason="the recorded failure is not safely retryable without reconciliation",
                 checkpoint=checkpoint,
             )
         return RecoveryDecision(
@@ -207,7 +213,7 @@ class DurableActionRunner:
             self.store.update(
                 checkpoint_id,
                 stage=CheckpointStage.PREPARED,
-                note="recovery retry after a recorded retryable failure",
+                note="recovery retry after a recorded retryable failure under the replay-safety contract",
             )
         return await self.execute_prepared(checkpoint_id, approved=approved)
 
