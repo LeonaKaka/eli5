@@ -40,12 +40,31 @@ class Plan(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("plan step ids must be unique")
         known = set(ids)
+        graph: dict[str, list[str]] = {}
         for step in self.steps:
             if step.id in step.dependencies:
                 raise ValueError(f"step {step.id} cannot depend on itself")
             unknown = set(step.dependencies) - known
             if unknown:
                 raise ValueError(f"step {step.id} has unknown dependencies: {sorted(unknown)}")
+            graph[step.id] = list(step.dependencies)
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(step_id: str) -> None:
+            if step_id in visited:
+                return
+            if step_id in visiting:
+                raise ValueError("plan dependencies must not contain a cycle")
+            visiting.add(step_id)
+            for dependency in graph[step_id]:
+                visit(dependency)
+            visiting.remove(step_id)
+            visited.add(step_id)
+
+        for step_id in graph:
+            visit(step_id)
         return self
 
     def ready_step_ids(self) -> list[str]:
