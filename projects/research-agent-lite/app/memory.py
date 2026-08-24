@@ -120,6 +120,10 @@ class MemoryStore:
         decision = self.policy.evaluate(request)
         if not decision.allow:
             return MemoryWriteResult(decision=decision)
+        if request.id in self._records:
+            raise ValueError(
+                "memory id already exists; write a new id and invalidate the old record instead"
+            )
         record = MemoryRecord(
             id=request.id,
             kind=request.kind,
