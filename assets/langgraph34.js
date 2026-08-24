@@ -1,0 +1,19 @@
+(()=>{const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
+const loopSteps=[
+ {node:'model',label:'HumanMessage',body:'find depinning paper',meta:'role=user'},
+ {node:'model',label:'AIMessage',body:'tool_calls: search_papers(query="find depinning paper")',meta:'tool_call_id=call-search-papers-1',kind:'toolcall'},
+ {node:'tools',label:'ToolMessage',body:'paper:depinning-baseline | query=find depinning paper',meta:'tool_call_id=call-search-papers-1'},
+ {node:'model',label:'AIMessage',body:'Grounded answer from tool result: ...',meta:'tool_calls=[]'},
+ {node:'end',label:'END',body:'tools_condition sees no tool_calls → stop',meta:'graph terminates'}
+];let li=0;
+function renderLoop(note){if(!$('#toolMessages'))return;$('#toolMessages').innerHTML=loopSteps.slice(0,li).map(x=>`<div class="msg-card ${x.kind||''}"><b>${x.label}</b><div>${x.body}</div><div class="msg-meta">${x.meta}</div></div>`).join('')||'<div class="msg-card"><b>READY</b><div>等待第一步。</div></div>';$$('[data-loop-node]').forEach(n=>{const active=li<loopSteps.length?loopSteps[li].node:null;n.classList.toggle('active',n.dataset.loopNode===active);n.classList.toggle('done',loopSteps.slice(0,li).some(x=>x.node===n.dataset.loopNode));});const log=$('#toolLoopLog');if(log)log.textContent=note||`next = ${li<loopSteps.length?loopSteps[li].label:'END'}`;}
+const ln=$('#toolLoopNext');if(ln)ln.addEventListener('click',()=>{if(li<loopSteps.length){const x=loopSteps[li++];renderLoop(`${x.node}: ${x.label}`)}else renderLoop('Graph 已结束。')});const lr=$('#toolLoopReset');if(lr)lr.addEventListener('click',()=>{li=0;renderLoop('RESET')});renderLoop();
+
+let cmdRoute='research';function renderCommand(){if(!$('#commandState'))return;const objective=cmdRoute==='research'?'find research evidence about depinning':'format this title';const state={objective,route:cmdRoute,events:[`decide:${cmdRoute}`],answer:null};$('#commandState').textContent=JSON.stringify(state,null,2);$('#commandGoto').textContent=`goto = "${cmdRoute}"`;$$('[data-command-hop]').forEach(x=>x.classList.toggle('active',x.dataset.commandHop===cmdRoute));$('#commandExplanation').textContent=`Command 同时提交 state update(route/events) 和控制流 goto=${cmdRoute}。`}
+$$('[data-command-route]').forEach(b=>b.addEventListener('click',()=>{cmdRoute=b.dataset.commandRoute;$$('[data-command-route]').forEach(x=>x.classList.toggle('active',x===b));renderCommand()}));renderCommand();
+
+let fanout=3;const names=['domain wall','random field','coercive field','hysteresis','depinning'];function renderSend(){if(!$('#sendWorkers'))return;const items=names.slice(0,fanout);$('#sendCount').textContent=fanout;$('#sendWorkers').innerHTML=items.map((q,i)=>`<div class="send-worker"><b>Send #${i+1}</b><code>retrieve_one</code><small>{ query: "${q}" }</small></div>`).join('');const evidence=items.map(q=>'evidence:'+q);$('#sendBucket').textContent=JSON.stringify(evidence,null,2);$('#sendSummary').textContent=`${fanout} evidence item(s) → summarize once after fan-in`;}
+const slider=$('#sendRange');if(slider)slider.addEventListener('input',()=>{fanout=Number(slider.value);renderSend()});renderSend();
+
+$$('[data-control-mode]').forEach(b=>b.addEventListener('click',()=>{const mode=b.dataset.controlMode;$$('[data-control-mode]').forEach(x=>x.classList.toggle('active',x===b));const box=$('#controlCompare');if(!box)return;box.textContent=mode==='edge'?'Conditional Edge：routing function 只负责返回下一节点；state update 通常由前一个 node 单独返回。':mode==='command'?'Command：一个 node 可以在同一个返回值里 update State + goto。适合更新和路由本来就是同一个决策的情况。':'Send：不是“goto 一个固定节点”，而是动态生成多个带不同输入 state 的下游任务。';}));
+})();
