@@ -143,23 +143,59 @@ def test_approval_pause_and_resume_enqueue_exact_run_revision() -> None:
     assert control.claim(resume).accepted
 
 
-def test_stale_manual_job_cannot_reanimate_completed_run() -> None:
+def test_abandoned_running_run_is_requeued_with_new_revision_and_checkpoint() -> None:
     control = ProductionControlPlane()
-    submitted = control.submit(run_id="run-5", tenant_id="tenant-a", objective="short")
+    submitted = control.submit(run_id="run-5", tenant_id="tenant-a", objective="long task")
     start = control.queue.pop()
     assert start is not None
     running = control.claim(start)
     assert running.accepted
-    completed = control.finish("run-5", tenant_id="tenant-a", trace_events=7)
+    assert running.record.status is RunStatus.RUNNING
+
+    abandoned = control.requeue_abandoned(
+        "run-5",
+        tenant_id="tenant-a",
+        expected_revision=running.record.revision,
+        checkpoint_id="run-5:checkpoint-7",
+        attempt=2,
+    )
+    assert abandoned.status is RunStatus.PAUSED
+    assert abandoned.current_checkpoint_id == "run-5:checkpoint-7"
+    assert abandoned.revision > running.record.revision
+
+    recovery = control.queue.pop()
+    assert recovery is not None and recovery.kind is JobKind.RESUME
+    assert recovery.attempt == 2
+    assert recovery.expected_revision == abandoned.revision
+    assert control.claim(recovery).accepted
+
+    old_start = RunJob(
+        id="run-5:old-start",
+        run_id="run-5",
+        tenant_id="tenant-a",
+        kind=JobKind.START,
+        expected_revision=submitted.revision,
+    )
+    assert not control.claim(old_start).accepted
+
+
+def test_stale_manual_job_cannot_reanimate_completed_run() -> None:
+    control = ProductionControlPlane()
+    submitted = control.submit(run_id="run-6", tenant_id="tenant-a", objective="short")
+    start = control.queue.pop()
+    assert start is not None
+    running = control.claim(start)
+    assert running.accepted
+    completed = control.finish("run-6", tenant_id="tenant-a", trace_events=7)
     assert completed.status is RunStatus.COMPLETED
 
     stale = RunJob(
-        id="run-5:redelivery",
-        run_id="run-5",
+        id="run-6:redelivery",
+        run_id="run-6",
         tenant_id="tenant-a",
         kind=JobKind.START,
         expected_revision=submitted.revision,
     )
     claim = control.claim(stale)
     assert not claim.accepted
-    assert control.store.get("run-5", tenant_id="tenant-a").status is RunStatus.COMPLETED
+    assert control.store.get("run-6", tenant_id="tenant-a").status is RunStatus.COMPLETED
