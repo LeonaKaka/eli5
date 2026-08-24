@@ -7,6 +7,8 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 - Python 02 — Function contracts, type hints, Pydantic, schemas · v0.2
 - Python 03 — Modules, packages, imports, dependency direction, project structure · v0.3
 - Python 04 — HTTP, JSON, status codes, httpx, API clients · v0.4
+- Python 05 — async / await, event loop, gather, concurrency limits · v0.5
+- Python 06 — exceptions, retry/backoff, logging, fallback, idempotency · v0.6
 
 ## Teaching contract
 Every lesson must include:
@@ -22,10 +24,10 @@ Every lesson must include:
 02. Functions, type hints, Pydantic ✅
 03. Modules, packages, project structure ✅
 04. HTTP, JSON, APIs ✅
-05. async / await
-06. Failure engineering: exceptions, logging, retry
+05. async / await ✅
+06. Failure engineering ✅
 07. Classes, dataclasses, state
 08. Testing + Research Agent Lite v1.0
 
 ## Pages
-Deployed with GitHub Actions from the repository root. No build step, backend, or API key is required for the learning UI.
+Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
