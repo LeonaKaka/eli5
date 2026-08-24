@@ -1,0 +1,48 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Python 06 · Failure Engineering</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/lesson56.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Python<small>for AI Agent Engineering</small></div><div class="nav-label">Python</div><nav class="nav"><a href="../"><span class="num">⌂</span>课程首页</a><a href="01-basics.html"><span class="num">01</span>数据积木</a><a href="02-types-pydantic.html"><span class="num">02</span>数据契约</a><a href="03-project-structure.html"><span class="num">03</span>工程结构</a><a href="04-http-json-api.html"><span class="num">04</span>HTTP / API</a><a href="05-async-await.html"><span class="num">05</span>async / await</a><a class="active" href="06-failure-engineering.html"><span class="num">06</span>Failure Engineering</a></nav><div class="progress-box"><div class="progress-row"><span>Python 内容</span><span>6 / 8</span></div><div class="progress"><i style="width:75%"></i></div></div></aside><main class="content"><section class="hero"><span class="kicker">Python 06 · Research Agent v0.6</span><h1>可靠系统不是“不失败”。<br>是知道失败后该怎么办。</h1><p class="lead">当 v0.5 开始并发调用多个服务，失败会更常见：<b>timeout、429、5xx、坏 JSON、权限错误、代码 bug</b>。真正的工程能力不是把它们全 catch 掉，而是先分类，再选择正确策略。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先学最重要的一件事：不是所有错误都该 retry</h2><div class="sub">点不同失败，看策略为什么完全不同。</div></div></div><div class="failure-stage" id="failureStage"><div class="failure-picker"><button data-failure="timeout">Timeout</button><button data-failure="rate">429</button><button data-failure="auth">401/403</button><button data-failure="json">坏 JSON</button><button data-failure="server">5xx</button><button data-failure="bug">代码 Bug</button></div><div class="failure-flow"><div class="failure-node bad" id="failureSource"></div><div class="failure-node" id="failureClass"></div><div class="failure-node" id="failureAction"></div><div class="failure-node good"><b>记录</b><br>日志 / trace / metric</div><div class="failure-node good"><b>结果</b><br>恢复、降级或清楚失败</div></div><div class="callout" id="failurePolicy"></div></div><div class="callout bad"><b>最危险的思想：</b>“失败了就 retry 三次。”如果 API key 错、代码有 bug、请求本身非法，重试只是重复制造同一个失败。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Exception：把不同失败变成不同“信号”</h2><div class="sub">异常不是为了把程序弄复杂，而是让调用者知道“发生了哪类问题”。</div></div></div><pre>try:
+    response = await client.get(url, timeout=5.0)
+    response.raise_for_status()
+    data = response.json()
+except TimeoutError:
+    ...
+except RateLimitError:
+    ...
+except ValidationError:
+    ...</pre><div class="grid2"><div class="card"><b>好的异常处理</b><p>只 catch 你能真正处理的错误；处理不了就继续抛，让更高层决定。</p></div><div class="card"><b>坏的异常处理</b><p><code>except Exception: pass</code> 把 bug、网络错、数据错全部抹平，最后只剩“怎么结果是 None？”</p></div></div><pre>try:
+    result = await search()
+except Exception:
+    pass   # ❌ 调试信息、失败原因、恢复机会全没了</pre></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Retry 为什么需要 Backoff，而不是连点刷新</h2><div class="sub">上游已经过载，你立即重试可能正好让它更糟。</div></div></div><div class="failure-stage"><div class="controls"><button class="btn primary" id="runRetry">演示指数退避</button></div><div class="retry-timeline" id="retryTimeline"><div class="attempt"><div class="wait" style="--h:32px">立即</div><small>attempt 1</small></div></div><p id="retryText">点按钮看下一次尝试为什么越来越晚。</p></div><pre>for attempt in range(max_attempts):
+    try:
+        return await call_api()
+    except TemporaryError:
+        if attempt == max_attempts - 1:
+            raise
+        delay = 2 ** attempt
+        await asyncio.sleep(delay)</pre><div class="callout warn"><b>真实系统还常加 jitter。</b>如果一万台客户端都严格等 1s、2s、4s，它们可能又同时醒来形成“重试风暴”；随机抖动可以把时间错开。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Logging：失败以后，你至少得能回答“发生了什么”</h2><div class="sub">print 只告诉你一句话；结构化日志要能把一次请求串起来。</div></div></div><div class="failure-stage"><div class="mode-switch"><button data-log="timeout">失败场景</button><button data-log="success">成功场景</button></div><div class="log-console" id="logConsole"></div></div><h3>一条有用的日志通常包含</h3><div class="mini-stack"><div><strong>request_id / trace_id</strong>：把同一次用户请求的多个步骤串起来</div><div><strong>tool / model / endpoint</strong>：到底哪个依赖失败</div><div><strong>attempt / elapsed_ms</strong>：第几次、花了多久</div><div><strong>decision</strong>：最后 retry、fallback 还是 fail fast</div></div><div class="callout">如果用户只说“刚才 Agent 卡住了”，你应该能靠 request_id 看到它卡在搜索、模型、数据库还是工具，而不是靠猜。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Fallback：不是所有依赖都必须“全成才算成功”</h2><div class="sub">Research Agent 同时查三个来源，Web 挂了，arXiv/Crossref 还在。</div></div></div><div class="flow"><div class="node">arXiv<br>✅ 6 条</div><span class="arrow">+</span><div class="node">Web<br>❌ timeout</div><span class="arrow">+</span><div class="node">Crossref<br>✅ 4 条</div><span class="arrow">→</span><div class="node">Partial Result<br>带降级标记</div></div><pre>results = await asyncio.gather(
+    search_arxiv(query),
+    search_web(query),
+    search_crossref(query),
+    return_exceptions=True,
+)</pre><div class="callout warn"><b>注意：</b><code>return_exceptions=True</code> 不是“错误自动解决了”。你只是把异常也收回来，后面仍要判断哪个源失败、是否允许部分结果、是否需要向用户披露。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Retry 有一个更危险的坑：副作用可能被执行两次</h2><div class="sub">“查天气”重复两次没大事，“发邮件 / 扣款 / 创建订单”重复两次就完全不同。</div></div></div><div class="grid2"><div class="card"><div class="emoji">🔎</div><b>通常较安全重试</b><p>只读搜索、GET 查询、无副作用计算。仍要考虑成本和限流。</p></div><div class="card"><div class="emoji">📨</div><b>必须谨慎</b><p>发消息、创建资源、写数据库、支付、删除操作。第一次可能已经成功，只是响应丢了。</p></div></div><div class="callout bad"><b>Agent Tool Calling 特别要注意：</b>工具超时不代表“工具没有执行”。对有副作用操作，应考虑 idempotency key、操作状态查询、human approval 或显式去重。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>什么时候 Fail Fast，什么时候继续？</h2><div class="sub">可靠不是“永远尽量返回东西”，有些条件下继续执行反而危险。</div></div></div><table class="table error-matrix"><tr><th>情况</th><th>常见策略</th><th>原因</th></tr><tr><td>搜索源 timeout</td><td><span class="policy-chip policy-retry">retry / partial</span></td><td>暂时性，且其他来源可用</td></tr><tr><td>429</td><td><span class="policy-chip policy-wait">wait / limit</span></td><td>需要尊重限流而不是立即重试</td></tr><tr><td>认证失败</td><td><span class="policy-chip policy-fail">fail fast</span></td><td>同一凭据重复尝试没有意义</td></tr><tr><td>响应缺字段</td><td><span class="policy-chip policy-fallback">validate / fallback</span></td><td>不能把坏数据当正常数据继续传</td></tr><tr><td>删除操作状态不明</td><td><span class="policy-chip policy-fail">stop / verify</span></td><td>盲目重试可能重复副作用</td></tr></table></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Research Agent v0.6：从“会联网”升级到“可恢复地联网”</h2><div class="sub">现在搜索层不仅并发，还明确区分 transient failure、bad data 和 fatal configuration。</div></div></div><pre>async def safe_search(query: str):
+    try:
+        return await call_with_retry(
+            lambda: search_web(query),
+            max_attempts=3,
+        )
+    except TemporaryError as exc:
+        logger.warning("web search unavailable", extra={"error": str(exc)})
+        return []
+
+async def gather_evidence(query: str):
+    arxiv, web = await asyncio.gather(
+        search_arxiv(query),
+        safe_search(query),
+    )
+    return {"arxiv": arxiv, "web": web}</pre><div class="exercise"><b>练习 A · 选策略</b><p>LLM 返回 401，你应该：A. 立即 retry 10 次；B. fail fast 并检查配置；C. 无限 backoff。</p><details><summary>答案</summary><p>B。认证失败通常不是暂时性网络问题，重复同一凭据没有意义。</p></details></div><div class="exercise"><b>练习 B · Agent 副作用</b><p>“发送邮件”工具调用 5 秒后 timeout。你能不能直接再调用一次？</p><details><summary>答案</summary><p>不能默认安全。第一次可能已经发出，只是确认响应丢失。应查询状态、使用幂等机制或让工具设计支持去重。</p></details></div><div class="callout interview"><b>面试验收：</b>① 哪些错误适合 retry？② exponential backoff 与 jitter 分别解决什么？③ 为什么不能 <code>except Exception: pass</code>？④ structured logging 应包含哪些字段？⑤ partial result 什么时候合理？⑥ 为什么副作用操作的 retry 更危险？⑦ timeout 是否代表远端一定没有执行？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="python06">我能为不同失败选择不同策略</label></div></section><div class="footer">下一批：07 Object / State + 08 Testing，把 Research Agent Lite 收束成 Python 阶段 v1.0。</div></main></div><script src="../assets/app.js"></script><script src="../assets/lesson56.js"></script></body></html>
