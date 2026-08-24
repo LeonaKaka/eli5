@@ -1,4 +1,4 @@
-# Research Assistant v5.2
+# Research Assistant v5.4
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
@@ -6,10 +6,12 @@ Python closed at **v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.
 
 ## FastAPI increments
 
-- **v5.1** — first real `FastAPI()` application around the existing product Run model; `POST /runs` creates a queued Run and `GET /runs/{run_id}` reads it. Long Agent work remains behind the Queue/Worker boundary instead of executing inline in the request.
-- **v5.2** — explicit Pydantic `CreateRunRequest` / `RunResponse`, `Annotated + Depends` tenant/runtime dependencies, tenant-scoped lookup, response filtering and OpenAPI-visible header requirements.
+- **v5.1** — first real `FastAPI()` application around the product Run model; `POST /runs` creates a queued Run and `GET /runs/{run_id}` reads it.
+- **v5.2** — explicit Pydantic request/response contracts, `Annotated + Depends` tenant/runtime dependencies, anti-enumeration lookup and public response filtering.
+- **v5.3** — explicit request/worker lifetime separation; `run_one_worker_tick()` pops durable jobs outside the HTTP request and can offload the current synchronous Graph adapter with `anyio.to_thread.run_sync()` inside the worker.
+- **v5.4** — native FastAPI SSE via `EventSourceResponse` / `ServerSentEvent`, bounded client-safe Run event log, `Last-Event-ID` replay, retention-gap detection and tenant-scoped `/runs/{run_id}/stream`.
 
-Current FastAPI reference line used by the course: `fastapi>=0.141,<1` with Pydantic v2. The project keeps `fastapi[standard]` so the local developer install also includes the standard server/test tooling.
+Current FastAPI reference line used by the course: `fastapi>=0.141,<1` with Pydantic v2.
 
 ## Run
 
@@ -19,64 +21,69 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest -q
 
-# Development HTTP server
 uvicorn app.fastapi_app:app --reload
 ```
 
-Then inspect `/docs` or `/openapi.json` and call:
+Current public routes:
 
 ```text
 POST /runs
 GET  /runs/{run_id}
+GET  /runs/{run_id}/stream
 ```
 
-Both currently require the teaching header `X-Tenant-ID`. It is deliberately **not** presented as production authentication; lesson 06 replaces that trust model with authenticated identity + authorization.
+They currently require the teaching header `X-Tenant-ID`. It is deliberately **not** production authentication; lesson 06 replaces this trust model with authenticated identity + authorization.
 
 ## Current structure
 
 ```text
 app/
-├── fastapi_app.py               # v5.1-v5.2 HTTP boundary / contracts / dependencies
-├── langgraph_production.py      # v5.0 Product control-plane ↔ LangGraph bridge
+├── fastapi_app.py               # v5.1-v5.4 HTTP contracts + SSE endpoint
+├── fastapi_worker.py            # v5.3 separate async worker adapter
+├── fastapi_streaming.py         # v5.4 client-safe Run event log/schema
+├── langgraph_production.py      # v5.0 product control-plane ↔ LangGraph bridge
 ├── production.py                # tenant RunStore / Queue / optimistic revisions / cancel
-├── langgraph_observability.py   # middleware + stream concepts
-├── langgraph_store.py           # Store / memory boundary
-├── langgraph_interrupts.py      # durable pause/resume
 └── ...
 
 tests/
 ├── test_fastapi_contracts.py
-├── test_langgraph_observability_production.py
+├── test_fastapi_async_sse.py
 └── ...
 ```
 
-## HTTP boundary
+## Async / Worker boundary
 
-`POST /runs` does **not** call `graph.invoke()` for a long-lived Agent run. It creates a product Run through `ProductionGraphBridge.submit()`, which records the Run and enqueues work. This keeps HTTP request lifetime separate from durable job lifetime.
+`async def` is an execution/concurrency choice, not a background-job guarantee. `POST /runs` still performs only short boundary work: validate, create the product Run and enqueue a job. It does not await a long Agent execution.
 
-The public `RunResponse` is intentionally smaller than internal `RunRecord`. Internal `tenant_id`, checkpoint ids, approval request ids and budgets are not returned merely because they exist in memory. The response model is an API projection, not a dump of the control-plane object.
+FastAPI runs normal `def` path operations/dependencies in a threadpool, but a normal utility function called directly from inside `async def` is still called directly. Short blocking SDK calls can therefore be isolated explicitly with thread offload. Long, durable Agent work belongs behind Queue/Worker regardless of syntax.
 
-## Tenant dependency boundary
+FastAPI `BackgroundTasks` remains useful for small same-process post-response work, but it is not the durability mechanism for this Agent: deployment restarts, multi-worker ownership, checkpoints, approval pauses and retry semantics remain in the existing control plane and Graph runtime.
 
-`TenantContext` is injected through `Annotated[..., Depends(...)]`. The current header-derived tenant exists only so lessons 01–02 can demonstrate dependency wiring, tenant isolation and OpenAPI integration. A real client must not be able to self-assert any tenant simply by choosing a header value; later security lessons derive tenant/workspace scope from authenticated identity and explicit authorization.
+## SSE boundary
 
-Cross-tenant lookup currently returns the same 404 as a missing Run to avoid confirming another tenant's resource existence. This is a deliberate anti-enumeration choice, not a universal rule for every API.
+The v5.4 stream endpoint uses FastAPI's native SSE response primitives. Run events first pass through `RunStreamEvent`, which contains only client-safe fields (`run_id`, event type, status/phase/progress/message). Tenant ids, checkpoint ids, internal approval ids, budgets and raw Graph state are not part of the SSE schema.
 
-## Tests added for v5.1-v5.2
+The teaching `InMemoryRunEventStore` is bounded and process-local. `Last-Event-ID` replays retained events with a larger sequence id. If the requested cursor has fallen behind retention, the API returns a conflict instead of pretending replay is complete; the client must refetch the current Run state and establish a new baseline.
 
-`test_fastapi_contracts.py` locks:
+A production multi-worker deployment needs a durable event log/pubsub backend. SSE connection lifetime is not Run ownership: a client disconnect does not cancel the Run, and a Worker does not depend on one browser connection staying alive.
 
-- `POST /runs` → `201 Created`, normalized objective, `QUEUED` state and exactly one queued job
-- `GET /runs/{id}` → 200; missing Run → 404
-- blank body / unknown fields / missing required tenant header → 422
-- another tenant cannot enumerate a Run
-- public response does not leak internal control-plane fields
-- generated OpenAPI includes the Run routes, 201 response and required `X-Tenant-ID` header
+## Tests added for v5.3-v5.4
 
-## What FastAPI does not replace
+`test_fastapi_async_sse.py` locks:
 
-FastAPI owns HTTP parsing, routing, dependency wiring, response serialization and OpenAPI. It does not replace durable queueing, worker claims/revisions, LangGraph checkpoint/interrupt semantics, tenant authorization, side-effect idempotency or cancellation policy.
+- a submitted Run remains `queued` until a separate worker tick executes the queued job
+- the worker can complete the Run outside the HTTP request lifecycle
+- `Last-Event-ID` replays only later SSE events
+- SSE never dumps internal control-plane/Graph fields
+- cross-tenant stream access returns the same 404-style boundary as ordinary Run lookup
+- malformed `Last-Event-ID` is rejected before streaming begins
+- a retention gap produces an explicit conflict instead of fake complete replay
+- OpenAPI documents the SSE route and optional `Last-Event-ID` header
+
+## What FastAPI still does not replace
+
+FastAPI owns HTTP parsing, routing, dependency wiring, SSE serialization and OpenAPI. It does not replace durable queueing, worker claims/revisions, LangGraph checkpoint/interrupt semantics, authentication/authorization, side-effect idempotency, cancellation policy or durable event infrastructure.
 
 ## Next step
 
-FastAPI 03–04: async request boundaries / blocking work / Queue+Worker separation, then Server-Sent Events that project safe Run/Graph progress to clients without exposing internal debug state.
+FastAPI 05–06: approval/cancel/idempotent command endpoints, then authenticated identity, authorization, Security dependencies and CORS/trusted-proxy boundaries.
