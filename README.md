@@ -14,15 +14,15 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 - 07 class, dataclass, mutable defaults, composition, AgentState · v0.7
 - 08 pytest, mock/fake, test layers, runnable Research Agent Lite · v1.0
 
-### LLM Application Engineering — 6/10 live
+### LLM Application Engineering — 8/10 live
 - 01 Model API / Request Lifecycle ✅
 - 02 Messages / Instructions / Conversation State ✅
 - 03 Tokens / Context Window / Context Engineering / Caching ✅
 - 04 Generation & Reasoning Controls ✅
 - 05 Streaming / TTFT / cancellation / partial output ✅
 - 06 Structured Outputs / JSON Schema / Pydantic / refusal ✅
-- 07 Tool / Function Calling
-- 08 Multimodal / Files
+- 07 Tool / Function Calling / permission / execution boundary ✅
+- 08 Multimodal / Files / asset lifecycle / provenance ✅
 - 09 Model Selection / Cost / Latency / Reliability
 - 10 Evals / Prompt Lifecycle / Production Safety
 
@@ -59,8 +59,10 @@ pytest -q
 - v1.4 — generation / reasoning profiles
 - v1.5 — explicit streaming state machine and partial-output semantics
 - v1.6 — Pydantic structured-result contracts, validation and refusal shape
+- v1.7 — provider-neutral ToolCall / ToolRegistry / ToolExecutor with schema + permission boundary
+- v1.8 — AssetRef / SourceRef / PreparedAsset pipeline with size policy and provenance
 
-Planned next: one controlled tool call, multimodal/file boundaries, model routing, usage accounting, and an eval suite.
+Planned next: model routing, usage/cost/latency accounting, fallback policy, and an eval/prompt-lifecycle suite.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
