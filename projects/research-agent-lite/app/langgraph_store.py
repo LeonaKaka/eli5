@@ -7,6 +7,7 @@ from typing_extensions import TypedDict
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
+from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 
 from .memory import (
@@ -68,16 +69,17 @@ def _record_value(request: MemoryWriteRequest) -> dict[str, Any]:
 
 def build_store_memory_graph(
     *,
-    store: InMemoryStore | None = None,
+    store: BaseStore | None = None,
     policy: MemoryWritePolicy | None = None,
 ):
-    """Compile a provider-free graph using a real LangGraph Store.
+    """Compile a provider-free graph using the real LangGraph BaseStore contract.
 
-    Store persistence is gated by the existing application MemoryWritePolicy.
-    The checkpointer remains thread-scoped; the Store remains cross-thread.
+    InMemoryStore is only the default teaching adapter. Store persistence is gated
+    by the existing application MemoryWritePolicy. The checkpointer remains
+    thread-scoped; the Store remains cross-thread.
     """
 
-    memory_store = store or InMemoryStore()
+    memory_store: BaseStore = store if store is not None else InMemoryStore()
     write_policy = policy or MemoryWritePolicy()
 
     def write_memory(
@@ -157,7 +159,7 @@ def build_store_memory_graph(
 
 
 def invalidate_store_memory(
-    store: InMemoryStore,
+    store: BaseStore,
     *,
     context: MemoryContext,
     scope: MemoryScope,
