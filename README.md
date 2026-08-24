@@ -29,13 +29,13 @@ Agent loop → state/budgets → planning → memory → tool orchestration → 
 
 Full scope: `docs/agent-roadmap.md`.
 
-### LangChain / LangGraph — 4/10 live
+### LangChain / LangGraph — 6/10 live
 - 01 LangChain vs LangGraph / abstraction ladder / `create_agent` vs custom `StateGraph` ✅
 - 02 `StateGraph` core / State / Node / Edge / Reducer / conditional routing / compile ✅
 - 03 LangChain `@tool` / `ToolNode` / `ToolMessage` / `tools_condition` / Agent Loop ✅
 - 04 Conditional Flow / `Command` / `Send` / dynamic fan-out / reducer fan-in ✅
-- 05 Persistence / Threads / Checkpointers
-- 06 Interrupt / Human-in-the-loop / Resume
+- 05 Persistence / Threads / Checkpointers / `get_state` / history / replay / `update_state` ✅
+- 06 `interrupt()` / Human-in-the-loop / `Command(resume=...)` / replay-safe side effects ✅
 - 07 Memory / Store
 - 08 Subgraphs / Multi-Agent / Handoff
 - 09 Middleware / Streaming / Observability
@@ -54,7 +54,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and the LangChain / LangGraph track now evolves it toward **Research Assistant v5.0**. Current project level: **v4.4**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and the LangChain / LangGraph track now evolves it toward **Research Assistant v5.0**. Current project level: **v4.6**.
 
 ```bash
 cd projects/research-agent-lite
@@ -64,7 +64,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Current framework dependencies intentionally track the current major lines used by the lessons: `langchain>=1.3,<2` and `langgraph>=1.2,<2`.
+Current framework dependencies track the current major lines used by the lessons: `langchain>=1.3,<2` and `langgraph>=1.2,<2`.
 
 ## Current LangChain / LangGraph increments
 
@@ -72,8 +72,12 @@ Current framework dependencies intentionally track the current major lines used 
 - v4.2 — typed graph state, partial node updates, append reducers, fixed edges and conditional routing
 - v4.3 — real LangChain tool schema + LangGraph `ToolNode` / `tools_condition`; deterministic model node emits genuine `AIMessage.tool_calls`, and Tool results return as correlated `ToolMessage` objects
 - v4.4 — `Command(update + goto)` plus `Send` dynamic map-reduce, reducer-based fan-in and explicit dynamic worker state
+- v4.5 — real `InMemorySaver` checkpointer, `thread_id`, `StateSnapshot`, `get_state()`, `get_state_history()` and `update_state()` semantics
+- v4.6 — real `interrupt()` + `Command(resume=...)` HITL graphs, with an executable unsafe demo proving that code before an interrupt can replay when the node restarts
 
-The migration is incremental. Existing Tool authorization, RAG, approval, replay-safety, tenant, authorization and evaluation boundaries remain application concerns unless a later lesson explicitly maps them to a framework abstraction. `ToolNode` executes registered tools but is not a replacement for tenant authorization or side-effect approval. `Send` expresses dynamic work, but production concurrency/rate limits still need explicit policy.
+The migration is incremental. Existing Tool authorization, RAG, approval policy, replay safety, tenant boundaries and regression gates remain application concerns unless a later lesson explicitly maps them to a framework abstraction.
+
+`InMemorySaver` is used only for teaching/tests and does not survive a process restart. A checkpointer persists thread-scoped graph state; it is not a replacement for a product RunStore, queue lease, tenant authorization or cross-thread long-term memory. Interrupts provide durable pause/resume, but business approval policy and exact-action authorization remain application-side contracts.
 
 ## Pages
-Deployed with GitHub Actions from the repository root. No backend or secret is required for the static learning UI. Lessons 01–04 remain provider-free: they exercise real LangGraph APIs without requiring an external model key.
+Deployed with GitHub Actions from the repository root. No backend or secret is required for the static learning UI. Lessons 01–06 remain provider-free: they exercise real LangGraph APIs without requiring an external model key.
