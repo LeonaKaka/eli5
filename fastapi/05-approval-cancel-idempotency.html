@@ -1,0 +1,44 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 05 · Approval / Cancel / Idempotency</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi56.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">05 · Research Assistant v5.5</span><h1>“用户点了批准”不是一句业务描述。<br>它是一个可能重试、重复、过期的 HTTP command。</h1><p class="lead">移动网络会重试、浏览器会双击、代理会重发、两个标签页可能同时操作同一个 Run。对于 approval / cancel 这种改变控制面的请求，只写一个 `POST` endpoint 远远不够：你还需要 <b>revision precondition + idempotency key + exact target identity</b>。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先看一个真实失败：双击 Approve</h2><div class="sub">如果 endpoint 只是“收到请求就 enqueue resume”，两次点击就是两个 RESUME job。</div></div></div><div class="race-track"><div class="race-step">Run<br><b>WAITING_APPROVAL r3</b></div><div class="race-step">Click A<br><b>approve</b></div><div class="race-step">Click B<br><b>approve</b></div><div class="race-step blocked">Queue<br><b>RESUME ×2 ❌</b></div><div class="race-step blocked">Graph<br><b>重复推进风险</b></div></div><div class="callout bad"><b>“POST 不是幂等”不是借口。</b>某个 HTTP method 的通用语义，不等于你的业务 command 可以接受重复副作用。</div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>三把锁分别解决不同问题</h2></div></div><div class="framework-stack"><div class="framework-layer"><strong>Exact target</strong><span>`/approvals/{approval_request_id}`：批准的是这一份具体 pending approval。</span></div><div class="framework-layer"><strong>If-Match / ETag</strong><span>“我是在 revision=3 的事实基础上发 command。” 防 stale client。</span></div><div class="framework-layer"><strong>Idempotency-Key</strong><span>“这是同一次逻辑 command 的网络重试。” 防重复执行。</span></div></div><div class="callout"><b>它们不能互相替代。</b>ETag 不知道两个请求是不是同一个 command；Idempotency-Key 也不知道客户端依据的 Run state 是否已经过期。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive · Command Race Lab</h2><div class="sub">模拟 WAITING_APPROVAL revision=3。试试双击、改 decision、用旧 ETag。</div></div></div><div class="command-lab"><div class="command-controls"><label>If-Match <input class="key-input" id="ifMatch" value='"3"'></label><label>Idempotency-Key <input class="key-input" id="idemKey" value="approve-001"></label><select class="select-input" id="approvalDecision"><option value="approve">approve</option><option value="reject">reject</option></select><button class="btn primary" id="commandSend">发送 command</button><button class="btn" id="commandDouble">模拟双击</button><button class="btn" id="commandReset">Reset</button></div><div class="revision-line"><span class="revision-pill">current ETag = <code id="etagNow">"3"</code></span><span class="revision-pill">RESUME jobs = <b id="resumeJobs">0</b></span><span class="http-status ok" id="commandStatus">200 · ready</span></div><div class="command-grid"><div class="command-pane"><b>服务器执行日志</b><pre id="commandOut">Run = WAITING_APPROVAL
+revision = 3
+resume jobs = 0</pre></div><div class="command-pane"><b>你应该观察到</b><p>同 key + 同 command：第二次返回同一 response，并标记 replay。</p><p>同 key + 改 decision：409，因为 key 已经绑定到另一条逻辑 command。</p><p>新 key + stale If-Match：412，因为你在旧事实基础上修改资源。</p><p>没有 If-Match：428，服务器要求客户端先声明 precondition。</p></div></div></div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>为什么先检查 Idempotency，再检查当前 revision？</h2><div class="sub">因为一次成功 command 本来就会把 revision 改掉。</div></div></div><pre>第一次：
+If-Match: "3"
+Idempotency-Key: approve-001
+→ execute
+→ Run revision = 4
+→ save response for approve-001
+
+网络超时，客户端重试：
+If-Match: "3"
+Idempotency-Key: approve-001
+
+如果你先看 current revision：
+3 != 4 → 412 ❌
+
+正确：
+先命中 approve-001 的已完成记录
+→ replay 原 response ✅</pre><p>所以 idempotency registry 不只是“记一个 key 用过没”，而是要把 key 与 command fingerprint 和原始结果绑定起来。</p></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>并发请求还有一个更隐蔽的竞态</h2></div></div><pre>Request A: lookup(key) → missing
+Request B: lookup(key) → missing
+Request A: approve() → enqueue RESUME
+Request B: approve() → enqueue RESUME
+Request A: remember(key)
+Request B: remember(key)</pre><div class="callout bad"><b>这仍然不是幂等。</b>课程版 `InMemoryIdempotencyStore.execute_once()` 把 lookup → execute → remember 放进同一个临界区。生产系统则需要数据库 unique constraint / atomic reservation / Redis 原子操作等跨副本方案。</div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>真实 API：Approve / Reject</h2></div></div><pre>POST /runs/{run_id}/approvals/{approval_request_id}
+Authorization: Bearer ...
+If-Match: "3"
+Idempotency-Key: approve-001
+Content-Type: application/json
+
+{
+  "decision": "approve"
+}</pre><p>成功时应用层先校验 tenant、permission、approval_request_id 和 revision，再调用 v5.0 的 `resolve_approval()`；只有通过之后才 enqueue RESUME。重复网络请求不会再次 enqueue。</p></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Cancel 也不是“一律立刻 CANCELLED”</h2></div></div><div class="compare-row"><div class="compare-cell"><b>QUEUED / WAITING_APPROVAL</b><p>还没有 active side effect ownership，可以直接进入 CANCELLED。</p></div><div class="compare-cell"><b>RUNNING</b><p>只能先 CANCELLING；Worker 在安全边界 acknowledge 后才是 CANCELLED。</p></div></div><pre>POST /runs/{run_id}/cancel
+Authorization: Bearer ...
+If-Match: "7"
+Idempotency-Key: cancel-004</pre><div class="callout warn"><b>HTTP cancel 不会穿越时间。</b>如果外部 Tool 已经产生副作用，Run 停止也不能自动撤销现实世界；仍要回到 durable execution 的 reconcile / compensation。</div></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>HTTP status 在这里表达什么？</h2></div></div><table class="table"><tr><th>状态</th><th>含义</th><th>客户端下一步</th></tr><tr><td>200</td><td>command 成功，或同 key replay 原结果</td><td>使用 response / ETag</td></tr><tr><td>409</td><td>业务状态冲突，或同 key 换了 command</td><td>不要盲重试；重新理解状态</td></tr><tr><td>412</td><td>If-Match 与当前 revision 不一致</td><td>GET 最新 Run，再决定</td></tr><tr><td>428</td><td>缺少必要 precondition</td><td>先 GET ETag，再提交 command</td></tr><tr><td>401/403</td><td>认证/授权失败</td><td>进入下一课</td></tr></table></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v5.5</h2><div class="sub">新增的是 command contract，不是新的 Agent autonomy。</div></div></div><pre>fastapi_commands.py
+├── parse_if_match()
+├── etag_for_revision()
+├── enforce_revision_precondition()
+├── command_fingerprint()
+└── InMemoryIdempotencyStore.execute_once()
+
+fastapi_app.py
+├── POST /runs/{id}/approvals/{approval_id}
+└── POST /runs/{id}/cancel</pre><p>所有 JSON Run response 现在还带 `ETag: "revision"`，让客户端有明确的 optimistic concurrency token。</p></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>第一次 approve 成功把 revision 从 3 改成 4，但客户端没收到响应，用同一个 Idempotency-Key 和原 If-Match:"3" 重试。最合理行为？</h4><button class="option" data-feedback="如果先用当前 revision 拒绝，会把一次普通网络重试误判成 stale command。">A. 直接 412</button><button class="option" data-correct="1">B. 命中同 key + 同 fingerprint 的已完成记录，replay 原 response，不再次 enqueue</button><button class="option" data-feedback="重新执行会破坏幂等。">C. 再 enqueue 一次 RESUME</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① ETag/If-Match 和 Idempotency-Key 分别防什么？② 为什么同 key 不同 body 要 409？③ 为什么“lookup 后 remember”存在竞态？④ 什么时候返回 412 vs 409？⑤ cancel RUNNING 为什么不是立即 CANCELLED？⑥ 幂等记录应该保留多久？⑦ 多 API replica 下怎么实现 atomic execute-once？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi05">我能设计可重试、可并发、不会重复推进 Agent 的 mutating command API</label></div></section><div class="footer">下一课：06 Auth / Security / CORS。Idempotency 防重复执行，但它不回答“这个人到底有没有权执行”。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi56.js"></script></body></html>
