@@ -19,7 +19,7 @@ API lifecycle → conversation state → context → generation → streaming �
 
 Full scope: `docs/llm-app-roadmap.md`.
 
-### RAG Engineering — 8/10 live
+### RAG Engineering — 10/10 complete
 - 01 Document Parsing / Document Model / OCR / provenance ✅
 - 02 Chunking / overlap / structure-aware boundaries / stable ids ✅
 - 03 Embeddings / cosine / dot / L2 / model compatibility ✅
@@ -28,8 +28,8 @@ Full scope: `docs/llm-app-roadmap.md`.
 - 06 Reranking / candidate recall / two-stage retrieval ✅
 - 07 Query Rewrite / Multi-query / decomposition / routing ✅
 - 08 Citation / Evidence Packing / provenance / dedup ✅
-- 09 Retrieval Eval
-- 10 End-to-End RAG Eval
+- 09 Retrieval Eval / Precision@K / Recall@K / MRR / nDCG / slices ✅
+- 10 End-to-End RAG Eval / groundedness / citation / failure taxonomy / gate ✅
 
 Full scope: `docs/rag-roadmap.md`.
 
@@ -44,7 +44,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, and RAG is now at **v2.8**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, and the RAG track closes at **Research Assistant v3.0**.
 
 ```bash
 cd projects/research-agent-lite
@@ -65,8 +65,14 @@ pytest -q
 - v2.6 — `Reranker` boundary with first-stage rank preserved through reranking
 - v2.7 — explicit `QueryPlan`, preserving original intent while separating search queries and synthesis
 - v2.8 — `EvidencePacker` / `EvidencePack` / `CitationRef`, with budget, source caps, near-duplicate suppression and provenance-derived citations
+- v2.9 — `RetrievalEvaluator` with Precision@K / Recall@K / Hit Rate / MRR / nDCG and tag-level slice reports
+- v3.0 — `RAGEvaluator` with retrieval/evidence/groundedness/citation metrics and failure-layer diagnosis
 
 The toy embedding, graph ANN, keyword-overlap reranker and rule-based query planner are deterministic teaching adapters. They validate architecture and failure boundaries offline; they are not presented as production semantic models, HNSW, cross-encoders or LLM query planners.
+
+## Next track
+
+Agent Engineering: agent loop, explicit state transitions, stopping conditions, memory, planning, tool selection, guardrails, human approval and durable execution.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
