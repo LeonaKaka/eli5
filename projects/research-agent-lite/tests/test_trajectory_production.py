@@ -119,6 +119,7 @@ def test_approval_pause_and_resume_enqueue_exact_run_revision() -> None:
     waiting = control.pause_for_approval(
         "run-4",
         tenant_id="tenant-a",
+        expected_revision=running.record.revision,
         approval_request_id="approval:call-9",
         checkpoint_id="run-4:send-9",
     )
@@ -167,7 +168,8 @@ def test_abandoned_running_run_is_requeued_with_new_revision_and_checkpoint() ->
     assert recovery is not None and recovery.kind is JobKind.RESUME
     assert recovery.attempt == 2
     assert recovery.expected_revision == abandoned.revision
-    assert control.claim(recovery).accepted
+    recovered = control.claim(recovery)
+    assert recovered.accepted
 
     old_start = RunJob(
         id="run-5:old-start",
@@ -178,6 +180,23 @@ def test_abandoned_running_run_is_requeued_with_new_revision_and_checkpoint() ->
     )
     assert not control.claim(old_start).accepted
 
+    with pytest.raises(RuntimeError, match="stale run revision"):
+        control.finish(
+            "run-5",
+            tenant_id="tenant-a",
+            expected_revision=running.record.revision,
+            trace_events=99,
+        )
+
+    completed = control.finish(
+        "run-5",
+        tenant_id="tenant-a",
+        expected_revision=recovered.record.revision,
+        trace_events=12,
+    )
+    assert completed.status is RunStatus.COMPLETED
+    assert completed.trace_events == 12
+
 
 def test_stale_manual_job_cannot_reanimate_completed_run() -> None:
     control = ProductionControlPlane()
@@ -186,7 +205,12 @@ def test_stale_manual_job_cannot_reanimate_completed_run() -> None:
     assert start is not None
     running = control.claim(start)
     assert running.accepted
-    completed = control.finish("run-6", tenant_id="tenant-a", trace_events=7)
+    completed = control.finish(
+        "run-6",
+        tenant_id="tenant-a",
+        expected_revision=running.record.revision,
+        trace_events=7,
+    )
     assert completed.status is RunStatus.COMPLETED
 
     stale = RunJob(
