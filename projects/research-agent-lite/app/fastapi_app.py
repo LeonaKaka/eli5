@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+import anyio
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .agent_control import RunStatus
+from .fastapi_streaming import InMemoryRunEventStore, RunEventType
 from .langgraph_production import ProductionGraphBridge
 from .production import RunRecord
 
@@ -79,8 +83,21 @@ def get_bridge(request: Request) -> ProductionGraphBridge:
     return request.app.state.bridge
 
 
+def get_run_events(request: Request) -> InMemoryRunEventStore:
+    return request.app.state.run_events
+
+
 TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
 BridgeDep = Annotated[ProductionGraphBridge, Depends(get_bridge)]
+RunEventsDep = Annotated[InMemoryRunEventStore, Depends(get_run_events)]
+
+
+_TERMINAL_STATUSES = {
+    RunStatus.COMPLETED,
+    RunStatus.FAILED,
+    RunStatus.STOPPED,
+    RunStatus.CANCELLED,
+}
 
 
 def _load_public_run(
@@ -99,16 +116,39 @@ def _load_public_run(
         ) from exc
 
 
-def create_app(*, bridge: ProductionGraphBridge | None = None) -> FastAPI:
+def _parse_last_event_id(raw: str | None) -> int:
+    if raw is None or not raw.strip():
+        return 0
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Last-Event-ID must be a non-negative integer",
+        ) from exc
+    if value < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Last-Event-ID must be a non-negative integer",
+        )
+    return value
+
+
+def create_app(
+    *,
+    bridge: ProductionGraphBridge | None = None,
+    event_store: InMemoryRunEventStore | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="Research Assistant API",
-        version="5.2.0",
+        version="5.4.0",
         description=(
             "HTTP boundary for the provider-neutral Research Assistant. "
             "Run creation enqueues durable work; it does not execute the Agent inline."
         ),
     )
     app.state.bridge = bridge or ProductionGraphBridge()
+    app.state.run_events = event_store or InMemoryRunEventStore()
 
     @app.post(
         "/runs",
@@ -121,12 +161,22 @@ def create_app(*, bridge: ProductionGraphBridge | None = None) -> FastAPI:
         body: CreateRunRequest,
         tenant: TenantDep,
         runtime: BridgeDep,
+        events: RunEventsDep,
     ) -> RunResponse:
         run = runtime.submit(
             run_id=f"run-{uuid4().hex}",
             tenant_id=tenant.tenant_id,
             objective=body.objective,
             approval_required=body.approval_required,
+        )
+        events.append(
+            tenant_id=tenant.tenant_id,
+            run_id=run.id,
+            event=RunEventType.RUN_CREATED,
+            status=run.status,
+            phase="queued",
+            progress=0,
+            message="Run accepted and queued for durable worker execution.",
         )
         return RunResponse.from_record(run)
 
@@ -147,6 +197,72 @@ def create_app(*, bridge: ProductionGraphBridge | None = None) -> FastAPI:
             tenant_id=tenant.tenant_id,
         )
         return RunResponse.from_record(record)
+
+    @app.get(
+        "/runs/{run_id}/stream",
+        response_class=EventSourceResponse,
+        tags=["runs"],
+        summary="Stream client-safe Run events with SSE",
+    )
+    async def stream_run(
+        run_id: str,
+        request: Request,
+        tenant: TenantDep,
+        runtime: BridgeDep,
+        events: RunEventsDep,
+        last_event_id: Annotated[
+            str | None,
+            Header(alias="Last-Event-ID", description="Resume after this SSE event id"),
+        ] = None,
+        follow: Annotated[
+            bool,
+            Query(description="Keep following future events; false is useful for replay/tests"),
+        ] = True,
+    ) -> EventSourceResponse:
+        record = _load_public_run(
+            runtime,
+            run_id=run_id,
+            tenant_id=tenant.tenant_id,
+        )
+        cursor = _parse_last_event_id(last_event_id)
+
+        oldest = events.oldest_sequence(tenant_id=tenant.tenant_id, run_id=run_id)
+        if last_event_id is not None and oldest is not None and cursor < oldest - 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="requested event history is no longer retained; refetch Run state",
+            )
+
+        async def event_source() -> AsyncIterator[ServerSentEvent]:
+            nonlocal cursor, record
+            while True:
+                batch = events.list_after(
+                    tenant_id=tenant.tenant_id,
+                    run_id=run_id,
+                    after_sequence=cursor,
+                )
+                for item in batch:
+                    cursor = item.sequence
+                    yield ServerSentEvent(
+                        id=str(item.sequence),
+                        event=item.event.value,
+                        data=item.public_data(),
+                    )
+
+                if not follow:
+                    return
+
+                record = runtime.control.store.get(
+                    run_id,
+                    tenant_id=tenant.tenant_id,
+                )
+                if record.status in _TERMINAL_STATUSES:
+                    return
+                if await request.is_disconnected():
+                    return
+                await anyio.sleep(0.25)
+
+        return EventSourceResponse(event_source())
 
     return app
 
