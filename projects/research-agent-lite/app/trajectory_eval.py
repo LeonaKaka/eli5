@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TrajectoryStepKind(StrEnum):
@@ -29,6 +29,20 @@ class TrajectoryCase(BaseModel):
     task_success: bool
     optimal_action_count: int = Field(ge=0)
     steps: list[TrajectoryStep] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_trace_order(self) -> "TrajectoryCase":
+        indexes = [step.index for step in self.steps]
+        if indexes != sorted(indexes) or len(indexes) != len(set(indexes)):
+            raise ValueError("trajectory step indexes must be unique and strictly increasing")
+        final_positions = [i for i, step in enumerate(self.steps) if step.kind is TrajectoryStepKind.FINAL]
+        if len(final_positions) > 1:
+            raise ValueError("trajectory may contain at most one final event")
+        if final_positions and final_positions[0] != len(self.steps) - 1:
+            raise ValueError("final event must be the last trajectory step")
+        if self.task_success and not final_positions:
+            raise ValueError("successful trajectory requires a final event")
+        return self
 
 
 class TrajectoryPolicy(BaseModel):
@@ -92,7 +106,7 @@ class TrajectoryEvaluator:
         handoff_accuracy = self._accuracy(handoff_steps)
         recovery_correctness = self._accuracy(recovery_steps)
         approval_violations = sum(step.critical_violation for step in approval_steps)
-        critical_violations = sum(step.critical_violation for step in actions)
+        critical_violations = sum(step.critical_violation for step in case.steps)
         repeated_actions = self._repeated_action_count(actions)
 
         failures: list[str] = []
