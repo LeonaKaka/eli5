@@ -1,1 +1,1 @@
-"""Research Assistant v6.0 teaching application package."""
+"""Research Assistant v6.2 teaching application package."""
