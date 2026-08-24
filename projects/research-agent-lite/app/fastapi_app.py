@@ -2,15 +2,33 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Annotated
 from uuid import uuid4
 
 import anyio
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .agent_control import RunStatus
+from .fastapi_commands import (
+    IdempotentCommandResult,
+    InMemoryIdempotencyStore,
+    command_fingerprint,
+    enforce_revision_precondition,
+    etag_for_revision,
+    normalize_idempotency_key,
+    parse_if_match,
+)
+from .fastapi_security import (
+    DemoTokenAuthenticator,
+    RunApprovePrincipal,
+    RunCancelPrincipal,
+    RunCreatePrincipal,
+    RunReadPrincipal,
+)
 from .fastapi_streaming import InMemoryRunEventStore, RunEventType
 from .langgraph_production import ProductionGraphBridge
 from .production import RunRecord
@@ -29,6 +47,16 @@ class CreateRunRequest(BaseModel):
         if not normalized:
             raise ValueError("objective must contain non-whitespace text")
         return normalized
+
+
+class ApprovalDecision(StrEnum):
+    APPROVE = "approve"
+    REJECT = "reject"
+
+
+class ResolveApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: ApprovalDecision
 
 
 class RunResponse(BaseModel):
@@ -56,33 +84,9 @@ class RunResponse(BaseModel):
 
 
 @dataclass(frozen=True)
-class TenantContext:
-    tenant_id: str
-
-
-@dataclass(frozen=True)
 class RunStreamContext:
     tenant_id: str
     cursor: int
-
-
-async def get_tenant_context(
-    x_tenant_id: Annotated[str, Header(alias="X-Tenant-ID", min_length=1, max_length=128)],
-) -> TenantContext:
-    """Teaching tenant dependency.
-
-    The header is only a boundary-input demo. Lesson 06 replaces this trust model
-    with authenticated identity + authorization; clients must not be allowed to
-    self-assert arbitrary tenant ids in a real deployment.
-    """
-
-    tenant_id = x_tenant_id.strip()
-    if not tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="X-Tenant-ID must not be blank",
-        )
-    return TenantContext(tenant_id=tenant_id)
 
 
 def get_bridge(request: Request) -> ProductionGraphBridge:
@@ -93,9 +97,13 @@ def get_run_events(request: Request) -> InMemoryRunEventStore:
     return request.app.state.run_events
 
 
-TenantDep = Annotated[TenantContext, Depends(get_tenant_context)]
+def get_idempotency_store(request: Request) -> InMemoryIdempotencyStore:
+    return request.app.state.idempotency_store
+
+
 BridgeDep = Annotated[ProductionGraphBridge, Depends(get_bridge)]
 RunEventsDep = Annotated[InMemoryRunEventStore, Depends(get_run_events)]
+IdempotencyDep = Annotated[InMemoryIdempotencyStore, Depends(get_idempotency_store)]
 
 
 _TERMINAL_STATUSES = {
@@ -122,6 +130,10 @@ def _load_public_run(
         ) from exc
 
 
+def _set_run_headers(response: Response, record: RunRecord) -> None:
+    response.headers["ETag"] = etag_for_revision(record.revision)
+
+
 def _parse_last_event_id(raw: str | None) -> int:
     if raw is None or not raw.strip():
         return 0
@@ -142,7 +154,7 @@ def _parse_last_event_id(raw: str | None) -> int:
 
 async def get_run_stream_context(
     run_id: str,
-    tenant: TenantDep,
+    principal: RunReadPrincipal,
     runtime: BridgeDep,
     events: RunEventsDep,
     last_event_id: Annotated[
@@ -150,21 +162,21 @@ async def get_run_stream_context(
         Header(alias="Last-Event-ID", description="Resume after this SSE event id"),
     ] = None,
 ) -> RunStreamContext:
-    """Validate stream ownership/cursor before the SSE response starts."""
+    """Authorize Run access and validate cursor before SSE headers are sent."""
 
     _load_public_run(
         runtime,
         run_id=run_id,
-        tenant_id=tenant.tenant_id,
+        tenant_id=principal.tenant_id,
     )
     cursor = _parse_last_event_id(last_event_id)
-    oldest = events.oldest_sequence(tenant_id=tenant.tenant_id, run_id=run_id)
+    oldest = events.oldest_sequence(tenant_id=principal.tenant_id, run_id=run_id)
     if last_event_id is not None and oldest is not None and cursor < oldest - 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="requested event history is no longer retained; refetch Run state",
         )
-    return RunStreamContext(tenant_id=tenant.tenant_id, cursor=cursor)
+    return RunStreamContext(tenant_id=principal.tenant_id, cursor=cursor)
 
 
 RunStreamDep = Annotated[RunStreamContext, Depends(get_run_stream_context)]
@@ -174,17 +186,38 @@ def create_app(
     *,
     bridge: ProductionGraphBridge | None = None,
     event_store: InMemoryRunEventStore | None = None,
+    idempotency_store: InMemoryIdempotencyStore | None = None,
+    authenticator: DemoTokenAuthenticator | None = None,
+    allowed_origins: tuple[str, ...] = ("https://app.example.test",),
 ) -> FastAPI:
     app = FastAPI(
         title="Research Assistant API",
-        version="5.4.0",
+        version="5.6.0",
         description=(
             "HTTP boundary for the provider-neutral Research Assistant. "
-            "Run creation enqueues durable work; it does not execute the Agent inline."
+            "Run creation enqueues durable work; mutating commands use auth, "
+            "revision preconditions and idempotency keys."
         ),
     )
     app.state.bridge = bridge or ProductionGraphBridge()
     app.state.run_events = event_store or InMemoryRunEventStore()
+    app.state.idempotency_store = idempotency_store or InMemoryIdempotencyStore()
+    app.state.authenticator = authenticator or DemoTokenAuthenticator()
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(allowed_origins),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Idempotency-Key",
+            "If-Match",
+            "Last-Event-ID",
+        ],
+        expose_headers=["ETag", "Idempotency-Replayed"],
+    )
 
     @app.post(
         "/runs",
@@ -195,18 +228,19 @@ def create_app(
     )
     async def create_run(
         body: CreateRunRequest,
-        tenant: TenantDep,
+        response: Response,
+        principal: RunCreatePrincipal,
         runtime: BridgeDep,
         events: RunEventsDep,
     ) -> RunResponse:
         run = runtime.submit(
             run_id=f"run-{uuid4().hex}",
-            tenant_id=tenant.tenant_id,
+            tenant_id=principal.tenant_id,
             objective=body.objective,
             approval_required=body.approval_required,
         )
         events.append(
-            tenant_id=tenant.tenant_id,
+            tenant_id=principal.tenant_id,
             run_id=run.id,
             event=RunEventType.RUN_CREATED,
             status=run.status,
@@ -214,31 +248,34 @@ def create_app(
             progress=0,
             message="Run accepted and queued for durable worker execution.",
         )
+        _set_run_headers(response, run)
         return RunResponse.from_record(run)
 
     @app.get(
         "/runs/{run_id}",
         response_model=RunResponse,
         tags=["runs"],
-        summary="Read one tenant-scoped run",
+        summary="Read one authorized tenant-scoped run",
     )
     async def get_run(
         run_id: str,
-        tenant: TenantDep,
+        response: Response,
+        principal: RunReadPrincipal,
         runtime: BridgeDep,
     ) -> RunResponse:
         record = _load_public_run(
             runtime,
             run_id=run_id,
-            tenant_id=tenant.tenant_id,
+            tenant_id=principal.tenant_id,
         )
+        _set_run_headers(response, record)
         return RunResponse.from_record(record)
 
     @app.get(
         "/runs/{run_id}/stream",
         response_class=EventSourceResponse,
         tags=["runs"],
-        summary="Stream client-safe Run events with SSE",
+        summary="Stream authorized client-safe Run events with SSE",
     )
     async def stream_run(
         run_id: str,
@@ -278,6 +315,175 @@ def create_app(
             if await request.is_disconnected():
                 return
             await anyio.sleep(0.25)
+
+    @app.post(
+        "/runs/{run_id}/approvals/{approval_request_id}",
+        response_model=RunResponse,
+        tags=["commands"],
+        summary="Approve or reject one exact paused approval request",
+    )
+    async def resolve_approval(
+        run_id: str,
+        approval_request_id: str,
+        body: ResolveApprovalRequest,
+        response: Response,
+        principal: RunApprovePrincipal,
+        runtime: BridgeDep,
+        events: RunEventsDep,
+        idempotency: IdempotencyDep,
+        idempotency_key_raw: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=200),
+        ],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> RunResponse:
+        current = _load_public_run(
+            runtime,
+            run_id=run_id,
+            tenant_id=principal.tenant_id,
+        )
+        expected_revision = parse_if_match(if_match)
+        idempotency_key = normalize_idempotency_key(idempotency_key_raw)
+        fingerprint = command_fingerprint(
+            operation="resolve_approval",
+            run_id=run_id,
+            target_id=approval_request_id,
+            expected_revision=expected_revision,
+            body=body.model_dump(mode="json"),
+        )
+
+        def execute() -> IdempotentCommandResult:
+            enforce_revision_precondition(
+                current_revision=current.revision,
+                expected_revision=expected_revision,
+            )
+            try:
+                updated = runtime.resolve_approval(
+                    run_id,
+                    tenant_id=principal.tenant_id,
+                    approval_request_id=approval_request_id,
+                    approved=body.decision is ApprovalDecision.APPROVE,
+                    actor_authorized=True,
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
+
+            if body.decision is ApprovalDecision.APPROVE:
+                events.append(
+                    tenant_id=principal.tenant_id,
+                    run_id=run_id,
+                    event=RunEventType.APPROVAL_RESOLVED,
+                    status=updated.status,
+                    phase="approval",
+                    message="Approval accepted; a durable resume job was queued.",
+                )
+            else:
+                events.append(
+                    tenant_id=principal.tenant_id,
+                    run_id=run_id,
+                    event=RunEventType.CANCELLED,
+                    status=updated.status,
+                    phase="approval_rejected",
+                    message="Approval rejected; Run was cancelled.",
+                )
+            public = RunResponse.from_record(updated)
+            return IdempotentCommandResult(
+                payload=public.model_dump(mode="json"),
+                etag=etag_for_revision(updated.revision),
+            )
+
+        result = idempotency.execute_once(
+            tenant_id=principal.tenant_id,
+            operation="resolve_approval",
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            execute=execute,
+        )
+        response.headers["ETag"] = result.etag
+        response.headers["Idempotency-Replayed"] = "true" if result.replayed else "false"
+        return RunResponse.model_validate(result.payload)
+
+    @app.post(
+        "/runs/{run_id}/cancel",
+        response_model=RunResponse,
+        tags=["commands"],
+        summary="Request idempotent cancellation of one Run",
+    )
+    async def cancel_run(
+        run_id: str,
+        response: Response,
+        principal: RunCancelPrincipal,
+        runtime: BridgeDep,
+        events: RunEventsDep,
+        idempotency: IdempotencyDep,
+        idempotency_key_raw: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=200),
+        ],
+        if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    ) -> RunResponse:
+        current = _load_public_run(
+            runtime,
+            run_id=run_id,
+            tenant_id=principal.tenant_id,
+        )
+        expected_revision = parse_if_match(if_match)
+        idempotency_key = normalize_idempotency_key(idempotency_key_raw)
+        fingerprint = command_fingerprint(
+            operation="cancel_run",
+            run_id=run_id,
+            expected_revision=expected_revision,
+        )
+
+        def execute() -> IdempotentCommandResult:
+            enforce_revision_precondition(
+                current_revision=current.revision,
+                expected_revision=expected_revision,
+            )
+            if current.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED}:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"terminal Run in status {current.status.value} cannot be cancelled",
+                )
+            updated = runtime.control.request_cancel(
+                run_id,
+                tenant_id=principal.tenant_id,
+            )
+            events.append(
+                tenant_id=principal.tenant_id,
+                run_id=run_id,
+                event=(
+                    RunEventType.CANCELLED
+                    if updated.status is RunStatus.CANCELLED
+                    else RunEventType.CANCEL_REQUESTED
+                ),
+                status=updated.status,
+                phase="cancel",
+                message=(
+                    "Run cancelled before active execution."
+                    if updated.status is RunStatus.CANCELLED
+                    else "Cancellation requested; Worker must stop at a safe boundary."
+                ),
+            )
+            public = RunResponse.from_record(updated)
+            return IdempotentCommandResult(
+                payload=public.model_dump(mode="json"),
+                etag=etag_for_revision(updated.revision),
+            )
+
+        result = idempotency.execute_once(
+            tenant_id=principal.tenant_id,
+            operation="cancel_run",
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            execute=execute,
+        )
+        response.headers["ETag"] = result.etag
+        response.headers["Idempotency-Replayed"] = "true" if result.replayed else "false"
+        return RunResponse.model_validate(result.payload)
 
     return app
 
