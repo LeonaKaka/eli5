@@ -277,3 +277,20 @@ def test_policy_can_require_approval_for_destructive_action_without_auto_executi
     assert pending.check.action is ApprovalAction.REQUIRE_APPROVAL
     assert pending.run_status is RunStatus.WAITING_APPROVAL
     assert calls == []
+
+
+def test_resume_rejects_a_pending_call_if_its_approved_payload_was_tampered_with() -> None:
+    calls: list[str] = []
+    registry, executor = approval_registry(calls)
+    manager = ApprovalManager(registry=registry, executor=executor)
+    pending = asyncio.run(
+        manager.submit(ToolCall(id="s3", name="send_message", arguments={"message": "approved text"}))
+    )
+    assert pending.request is not None
+
+    # Simulate storage/UI corruption while the request is waiting for approval.
+    pending.request.call.arguments["message"] = "different text"
+
+    with pytest.raises(ValueError, match="fingerprint mismatch"):
+        asyncio.run(manager.resume(pending.request.id, approved=True, reviewer="human@example"))
+    assert calls == []
