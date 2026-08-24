@@ -1,4 +1,4 @@
-# Research Assistant v5.6
+# Research Assistant v5.8
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
@@ -6,12 +6,14 @@ Python closed at **v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.
 
 ## FastAPI increments
 
-- **v5.1** — first real `FastAPI()` application around the product Run model; `POST /runs` creates a queued Run and `GET /runs/{run_id}` reads it.
-- **v5.2** — explicit Pydantic request/response contracts, dependency boundaries, anti-enumeration lookup and public response filtering.
-- **v5.3** — explicit request/worker lifetime separation; `run_one_worker_tick()` executes durable work outside the HTTP request.
-- **v5.4** — native FastAPI SSE, bounded client-safe Run event log, `Last-Event-ID` replay and retention-gap detection.
-- **v5.5** — approval/cancel command endpoints, public Run ETags, strong `If-Match` preconditions and an atomic teaching `Idempotency-Key` execute-once registry.
-- **v5.6** — `HTTPBearer` authentication, `Principal(subject, tenant_id, permissions)`, route-level permission dependencies, tenant derivation from authenticated identity, explicit credentialed CORS and proxy-trust guidance.
+- **v5.1** — first real `FastAPI()` Run resource API
+- **v5.2** — explicit request/response contracts and dependency boundaries
+- **v5.3** — HTTP request lifetime separated from durable Worker lifetime
+- **v5.4** — native SSE, client-safe event projection, `Last-Event-ID` replay and retention gaps
+- **v5.5** — approval/cancel commands, ETag/`If-Match`, atomic teaching `Idempotency-Key` execution
+- **v5.6** — `HTTPBearer`, Principal permissions, tenant derivation, CORS and proxy-trust boundaries
+- **v5.7** — stable `ProblemDetails`, request correlation, validation/HTTP/500 exception handlers and documented error responses
+- **v5.8** — dependency overrides, endpoint-unit vs integration boundaries and selective OpenAPI contract tests
 
 Current FastAPI reference line used by the course: `fastapi>=0.141,<1` with Pydantic v2.
 
@@ -22,7 +24,6 @@ python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest -q
-
 uvicorn app.fastapi_app:app --reload
 ```
 
@@ -36,7 +37,7 @@ POST /runs/{run_id}/approvals/{approval_request_id}
 POST /runs/{run_id}/cancel
 ```
 
-The provider-free teaching authenticator accepts these demo bearer tokens:
+Provider-free demo bearer tokens remain deterministic teaching credentials:
 
 ```text
 demo-owner-a   → tenant-a · read/create/approve/cancel
@@ -44,72 +45,64 @@ demo-viewer-a  → tenant-a · read only
 demo-owner-b   → tenant-b · read/create/approve/cancel
 ```
 
-Example:
-
-```text
-Authorization: Bearer demo-owner-a
-```
-
-These are not production credentials. They exist only to make authentication/authorization behavior deterministic without an external identity provider.
-
 ## Current structure
 
 ```text
 app/
-├── fastapi_app.py               # HTTP routes / SSE / command endpoints / CORS wiring
-├── fastapi_worker.py            # separate async worker adapter
-├── fastapi_streaming.py         # client-safe Run event log/schema
-├── fastapi_commands.py          # ETag / If-Match / Idempotency-Key contracts
-├── fastapi_security.py          # Bearer auth / Principal / permission dependencies
+├── fastapi_app.py               # routes / SSE / commands / CORS / error wiring
+├── fastapi_worker.py            # separate Worker adapter
+├── fastapi_streaming.py         # client-safe event log/schema
+├── fastapi_commands.py          # ETag / If-Match / Idempotency-Key
+├── fastapi_security.py          # Bearer / Principal / permission dependencies
+├── fastapi_errors.py            # ProblemDetails / request id / exception handlers
 ├── langgraph_production.py      # product control-plane ↔ LangGraph bridge
-├── production.py                # tenant RunStore / Queue / optimistic revisions / cancel
-└── ...
+└── production.py                # tenant RunStore / Queue / optimistic revisions
 
 tests/
 ├── test_fastapi_contracts.py
 ├── test_fastapi_async_sse.py
 ├── test_fastapi_commands_security.py
+├── test_fastapi_errors_testing.py
 └── ...
 ```
 
-## Command boundary
+## v5.7 public error boundary
 
-All public Run JSON responses expose a strong ETag derived from the Run revision, e.g. `ETag: "7"`. Approval and cancellation commands require `If-Match` plus `Idempotency-Key`.
+All client-facing errors now use a stable Problem Details-style schema:
 
-The two mechanisms solve different problems:
-
-- `If-Match` rejects a command based on stale Run state (`412 Precondition Failed`).
-- `Idempotency-Key` binds one logical command to one fingerprint/result so network retries replay the original response instead of re-executing it.
-
-Missing preconditions return 428. Reusing one idempotency key for a different command returns 409. The teaching in-memory registry keeps lookup → execute → remember inside one lock so same-process concurrent retries cannot both execute. Production needs a durable shared equivalent with atomic reservation/create-if-absent behavior across API replicas.
-
-Cancellation preserves the earlier control-plane semantics: queued/waiting runs may cancel immediately, while actively running work enters `CANCELLING` until a Worker confirms a safe boundary. HTTP cancellation still cannot roll back an already-executed external side effect.
-
-## Authentication / authorization boundary
-
-Tenant scope no longer comes from `X-Tenant-ID`. `HTTPBearer` extracts credentials, `DemoTokenAuthenticator` produces a Principal, and route dependencies require specific permissions:
-
-```text
-runs:read
-runs:create
-runs:approve
-runs:cancel
+```json
+{
+  "type": "urn:research-assistant:problem:precondition_failed",
+  "title": "Precondition failed",
+  "status": 412,
+  "detail": "Run revision changed: ...",
+  "instance": "/runs/run-42/cancel",
+  "code": "precondition_failed",
+  "request_id": "req-..."
+}
 ```
 
-Resource lookup always uses `principal.tenant_id`. A client can send a fake `X-Tenant-ID`, but it has no effect on authorization. Cross-tenant lookup continues to return 404 to avoid resource enumeration after authentication/permission checks.
+`RequestValidationError` is projected to sanitized location/message/type issues instead of echoing the raw request body. FastAPI/Starlette HTTP exceptions keep their meaningful status codes and protocol headers such as `WWW-Authenticate`. Unexpected 500s return a generic public detail; real exception text and traces belong in private telemetry correlated by `request_id`.
 
-The demo authenticator is not token validation guidance. A production adapter must validate the real identity mechanism's signatures/issuer/audience/expiry/revocation or equivalent session/API-key contract.
+Runtime exception handlers and OpenAPI documentation are separate responsibilities. The app therefore installs handlers **and** declares `ProblemDetails` through path-operation `responses=`.
 
-## CORS / proxy boundary
+## v5.8 testing boundary
 
-The application uses explicit origins, methods and request headers with `allow_credentials=True`; it does not combine credentialed requests with wildcard origins. CORS only controls browser cross-origin access and does not replace authentication or authorization.
+FastAPI dependency injection is also the test seam. Endpoint-unit tests can override `get_current_principal` and `get_bridge` with deterministic fakes when the test only cares about routing, authorization wiring, response projection or ETag behavior.
 
-Forwarded headers are a server/proxy trust concern. Only headers from configured trusted proxies should influence client IP/scheme/host interpretation; arbitrary client `X-Forwarded-*` headers are not identity.
+That does **not** replace integration tests. Queue delivery, optimistic revision, idempotency, LangGraph interrupt/resume and tenant isolation stay real in tests when those mechanisms are the thing being verified. Over-mocking them would produce fast tests that prove only the fake behavior.
 
-## Existing boundaries still apply
+OpenAPI contract tests selectively lock externally important structure: Bearer security, command headers, `ProblemDetails`, important response codes and route existence. They intentionally avoid snapshotting every generated OpenAPI detail.
 
-FastAPI does not replace durable queueing, worker claims/revisions, LangGraph checkpoint/interrupt semantics, side-effect idempotency, cancellation policy or durable event infrastructure. SSE connection lifetime is still not Run ownership.
+## Existing safety boundaries still apply
+
+- tenant comes from authenticated Principal, not a client-supplied tenant header
+- CORS is not authorization
+- ETag preconditions and idempotency keys solve different retry/concurrency problems
+- SSE connection lifetime is not Run ownership
+- FastAPI does not replace durable Queue/Worker claims, LangGraph checkpoints, replay safety or side-effect idempotency
+- a request id is correlation metadata, not identity or authorization
 
 ## Next step
 
-FastAPI 07–08: replace scattered `HTTPException` shapes with a stable public error contract/exception handlers, then use dependency overrides and contract-focused tests to separate endpoint-unit tests from integration tests.
+FastAPI 09–10: lifespan/resource ownership + liveness/readiness, then close the backend at Research Assistant **v6.0** with the final production Agent API architecture.
