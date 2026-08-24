@@ -27,11 +27,11 @@ StateGraph → ToolNode → Command/Send → persistence → interrupt/resume �
 
 Full scope: `docs/langchain-langgraph-roadmap.md`.
 
-### FastAPI — 2/10 live
+### FastAPI — 4/10 live
 - 01 API boundary / ASGI / `POST /runs` / `GET /runs/{id}` / 201 / 404 / OpenAPI ✅
 - 02 Pydantic contracts / `Annotated + Depends` / tenant context / response filtering ✅
-- 03 Async boundary / Worker separation
-- 04 SSE streaming
+- 03 async boundary / blocking SDK / threadpool / durable Worker separation ✅
+- 04 native SSE / `Last-Event-ID` / reconnect / retention / safe event projection ✅
 - 05 Approval / Cancel / Idempotent commands
 - 06 Auth / Security / CORS
 - 07 Errors / Exception handlers
@@ -46,7 +46,7 @@ Every lesson must include a concrete engineering problem, visual/explorable expl
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, LangChain / LangGraph at v5.0, and FastAPI now evolves it toward **Research Assistant v6.0**. Current level: **v5.2**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, LangChain / LangGraph at v5.0, and FastAPI now evolves it toward **Research Assistant v6.0**. Current level: **v5.4**.
 
 ```bash
 cd projects/research-agent-lite
@@ -63,8 +63,12 @@ Current framework/service dependencies follow the course reference lines: `langc
 
 - v5.1 — first real FastAPI application; `POST /runs` creates/enqueues a Run and `GET /runs/{run_id}` reads it
 - v5.2 — explicit request/response Pydantic models, tenant/runtime dependencies, anti-enumeration lookup and public response filtering
+- v5.3 — HTTP request lifetime separated from durable Worker lifetime; sync Graph adapter offloaded only inside the worker boundary
+- v5.4 — native SSE endpoint, client-safe Run events, Last-Event-ID replay and explicit retention-gap handling
 
-The HTTP layer deliberately preserves the existing architecture: request lifetime is not Agent-run lifetime. Creating a Run does not execute the long Agent inline; Queue/Worker/LangGraph remain separate. The current `X-Tenant-ID` dependency is a teaching input only and is not presented as production authentication.
+The HTTP layer deliberately preserves the existing architecture: request lifetime is not Agent-run lifetime, SSE connection lifetime is not Run ownership, and a client disconnect does not implicitly cancel durable work. The current `X-Tenant-ID` dependency is a teaching input only and is not presented as production authentication.
+
+`InMemoryRunEventStore` is a bounded teaching adapter. Production multi-worker SSE needs a durable event log/pubsub backend rather than process-local memory.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. The static learning UI requires no backend or secret.
