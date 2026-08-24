@@ -1,3 +1,5 @@
+import pytest
+
 from app.evals import EvalCase, RegressionGate
 from app.rag_eval import (
     ClaimResult,
@@ -39,6 +41,16 @@ def test_ndcg_rewards_putting_high_relevance_items_earlier() -> None:
     bad = ndcg_at_k(["background", "support", "direct"], relevance, 3)
     assert good == 1.0
     assert bad < good
+
+
+def test_no_answer_queries_use_a_separate_eval_contract() -> None:
+    with pytest.raises(ValueError, match="no-answer queries"):
+        RetrievalEvalCase(
+            id="negative-1",
+            query="a fact that is not in the corpus",
+            relevance={},
+            tags={"negative"},
+        )
 
 
 def base_case() -> RAGEvalCase:
