@@ -1,0 +1,46 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 02 · Contracts / Depends</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">02 · Research Assistant v5.2</span><h1>真正的 API contract 不只是“body 能 parse”。<br>它还要决定什么能进来、什么能出去、谁属于哪个 tenant。</h1><p class="lead">FastAPI 最强的地方不是 decorator，而是把 Python 类型、Pydantic schema 和 dependency graph 变成一套可验证的 HTTP contract。本课把 `CreateRunRequest`、`RunResponse`、`Annotated + Depends` 和 tenant boundary 接起来。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>输入模型和输出模型必须分开</h2><div class="sub">内部 RunRecord 不是 API response。</div></div></div><div class="schema-grid"><div class="schema-card"><b>CreateRunRequest</b><pre>objective: str
+approval_required: bool</pre></div><div class="schema-card"><b>RunResponse</b><pre>id
+objective
+status
+revision
+cancel_requested</pre></div></div><div class="callout warn"><b>不要 `return run.model_dump()`。</b>RunRecord 里还有 tenant_id、checkpoint_id、approval_request_id、budget 等内部控制字段；它们不应该因为“已经在对象里”就自动泄露给客户端。</div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Response Model 是输出防火墙</h2></div></div><div class="field-list"><div class="field-row"><span>id</span><b>public ✅</b></div><div class="field-row"><span>status / revision</span><b>public ✅</b></div><div class="field-row private"><span>tenant_id</span><b>internal</b></div><div class="field-row private"><span>current_checkpoint_id</span><b>internal</b></div><div class="field-row private"><span>approval_request_id</span><b>internal</b></div><div class="field-row private"><span>budget</span><b>internal</b></div></div><pre>@app.get(
+  "/runs/{run_id}",
+  response_model=RunResponse,
+)
+async def get_run(...):
+    return RunResponse.from_record(record)</pre><p>FastAPI 的 response model 会参与序列化、验证和 OpenAPI；更重要的是，它逼你显式设计“API 允许看到什么”。</p></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Pydantic 不只检查类型，还定义边界行为</h2></div></div><pre>class CreateRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str = Field(
+        min_length=1,
+        max_length=4000,
+    )
+    approval_required: bool = False</pre><div class="flow"><div class="node">未知字段</div><span class="arrow">→</span><div class="node">extra=forbid</div><span class="arrow">→</span><div class="node">422</div></div><p>如果客户端偷偷加 `admin=true`，API 不会“顺手忽略然后继续”。边界 contract 越明确，后面权限和升级越不容易出现 shadow fields。</p></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>`Depends` 是依赖图，不只是少写几行参数</h2></div></div><pre>async def get_tenant_context(
+    x_tenant_id: Annotated[
+        str,
+        Header(alias="X-Tenant-ID")
+    ],
+) -> TenantContext:
+    ...
+
+TenantDep = Annotated[
+    TenantContext,
+    Depends(get_tenant_context),
+]</pre><div class="flow"><div class="node">HTTP Header</div><span class="arrow">→</span><div class="node">dependency</div><span class="arrow">→</span><div class="node">TenantContext</div><span class="arrow">→</span><div class="node">endpoint</div></div><p>FastAPI 会调用 dependency、把它的输入也加入 OpenAPI，并把返回值注入 endpoint。官方当前也推荐 `Annotated + Depends` 写法。</p></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Interactive：Contract / Tenant Lab</h2><div class="sub">模拟同一个 Run 在不同输入边界下的 HTTP 结果。</div></div></div><div class="contract-lab"><div class="contract-pane"><div class="tenant-switch"><button class="btn active" data-tenant="tenant-a">tenant-a</button><button class="btn" data-tenant="tenant-b">tenant-b</button><button class="btn" id="toggleHeader">移除 Tenant Header</button><button class="btn" id="toggleBlank">改成空白 objective</button></div><h4>Request</h4><pre id="contractRequest"></pre></div><div class="contract-pane"><h4>Response</h4><pre id="contractResponse"></pre></div></div><div class="callout"><b>为什么 tenant-b 得到 404 而不是 403？</b>这是一种防资源枚举策略：不告诉另一个 tenant “这个 run 确实存在，只是你没权限”。是否这么设计要看产品威胁模型，但必须是显式选择。</div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>这版 Tenant Header 只是教学输入，不是真实认证</h2></div></div><div class="choice-card bad"><b>⚠ 现在的教学 baseline</b><pre>X-Tenant-ID: tenant-a</pre><p>客户端自己声明 tenant。适合本课看 dependency/isolation contract，不适合生产。</p></div><div class="choice-card good"><b>✅ 生产方向（第 06 课）</b><pre>Authorization: Bearer ...
+        ↓
+authenticate identity
+        ↓
+derive allowed tenant/workspace</pre><p>tenant 应来自认证身份和授权关系，而不是相信用户随便写的 header。</p></div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Dependency 注入 runtime，也避免全局对象到处 import</h2></div></div><pre>def get_bridge(request: Request):
+    return request.app.state.bridge
+
+BridgeDep = Annotated[
+    ProductionGraphBridge,
+    Depends(get_bridge),
+]</pre><p>后面测试时可以替换 dependency；生产 lifespan 里也能把数据库、HTTP client、queue adapter 作为 app-owned resource 管理，而不是模块 import 时偷偷初始化。</p></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>OpenAPI 会包含 dependency 的 header requirement</h2></div></div><div class="mini-openapi"><span class="method">POST</span><span class="code-route">/runs</span><span>X-Tenant-ID required</span><span class="method">GET</span><span class="code-route">/runs/{run_id}</span><span>X-Tenant-ID required</span></div><p>所以 dependency 不是“运行时黑盒”。它声明的 Header/Query/Cookie 等输入也会进入 HTTP schema。</p></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v5.2</h2></div></div><pre>CreateRunRequest
+RunResponse
+TenantContext
+TenantDep
+BridgeDep
+
+POST /runs
+GET  /runs/{run_id}</pre><div class="callout">项目测试已经覆盖：201 创建、404、不合法 body 422、缺 header 422、跨 tenant 不可枚举、response 不泄露内部控制字段、OpenAPI 记录 required header。</div></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>为什么不要直接把内部 RunRecord 当 response_model？</h4><button class="option" data-feedback="类型相同并不等于暴露边界相同。">A. 因为 FastAPI 不支持 Pydantic model</button><button class="option" data-correct="1">B. 内部模型包含控制面/敏感字段；独立 public response model 能显式过滤、稳定版本和生成正确 OpenAPI</button><button class="option" data-feedback="JSON 大小只是次要问题。">C. 只是为了少传几个字节</button><div class="feedback"></div></div><div class="callout interview"><b>追问：</b>① request model 和 response model 为什么分开？② `extra=forbid` 有什么价值？③ Depends 和普通 helper function 差别？④ Header dependency 如何进入 OpenAPI？⑤ tenant-b 为什么可能返回 404 而不是 403？⑥ 为什么 X-Tenant-ID 不能当真实 auth？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi02">我能设计 request/response/tenant dependency contract，而不是只写能跑的 endpoint</label></div></section><div class="footer">下一批：03 Async Boundary / Worker Separation + 04 SSE Streaming。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi12.js"></script></body></html>
