@@ -1,19 +1,21 @@
-# Research Assistant v2.4
+# Research Assistant v2.6
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-The eight Python lessons closed at **Research Agent Lite v1.0**. The ten LLM Application Engineering lessons upgraded the same codebase into **Research Assistant v2.0**. The RAG track keeps evolving that project instead of starting another demo.
+Python closed at **Research Agent Lite v1.0**. LLM Application Engineering upgraded the same codebase to **Research Assistant v2.0**. The RAG track continues evolving that project.
 
-Current project level: **v2.4**.
+Current project level: **v2.6**.
 
 ## RAG increments
 
-- **v2.1** — `BlockType`, `DocumentBlock`, `Document`, `DocumentParser`; parsed content has explicit reading order, block type and `SourceRef` provenance
-- **v2.2** — `ChunkPolicy`, `Chunk`, `StructureAwareChunker`; heading context, atomic tables, overlap, stable ids and policy version are explicit
-- **v2.3** — `EmbeddingProvider`, `EmbeddingService`, `EmbeddingRecord`; model id, dimension and normalization become part of the vector-space contract
-- **v2.4** — `VectorIndex`, `ExactVectorIndex`, `ApproximateGraphIndex`; exact search becomes the correctness baseline and educational ANN exposes the candidate-budget/recall trade-off
+- **v2.1** — `Document` / `DocumentBlock` / `DocumentParser`; structure, reading order and provenance are explicit
+- **v2.2** — `ChunkPolicy` / `Chunk` / `StructureAwareChunker`; heading context, tables, overlap and stable ids
+- **v2.3** — `EmbeddingProvider` / `EmbeddingService` / `EmbeddingRecord`; model id, dimension and normalization are part of the vector-space contract
+- **v2.4** — `VectorIndex`, `ExactVectorIndex`, educational `ApproximateGraphIndex`; exact search is the correctness baseline for ANN recall
+- **v2.5** — `BM25Index`, `RankedHit`, `HybridHit`, `reciprocal_rank_fusion`; lexical exact-match and dense ranking can be fused without assuming score calibration
+- **v2.6** — `Reranker`, `RerankCandidate`, `RerankHit`, `RerankService`; first-stage rank and rerank score remain separately observable
 
-The project remains offline-first so architecture and tests stay deterministic. `DeterministicToyEmbeddingProvider` is deliberately not a semantic embedding model, and `ApproximateGraphIndex` is deliberately not presented as production HNSW.
+The project stays offline-first so architecture and tests remain deterministic. `DeterministicToyEmbeddingProvider`, `ApproximateGraphIndex`, and `KeywordOverlapReranker` are deliberately teaching implementations, not production semantic embedding, HNSW, or cross-encoder claims.
 
 ## Run
 
@@ -30,25 +32,28 @@ pytest -q
 
 ```text
 app/
-├── documents.py       # v2.1 structured document ingestion model
-├── chunking.py        # v2.2 structure-aware chunk policy
-├── embeddings.py      # v2.3 provider-neutral embedding boundary + vector math
-├── vector_index.py    # v2.4 exact baseline + educational graph ANN
-├── multimodal.py      # AssetRef / SourceRef provenance foundation
-├── context.py         # context selection and budgeting
-├── evals.py           # regression gates reused by retrieval evals later
+├── documents.py       # v2.1 structured ingestion
+├── chunking.py        # v2.2 retrieval-unit policy
+├── embeddings.py      # v2.3 embedding boundary
+├── vector_index.py    # v2.4 exact + educational ANN
+├── lexical.py         # v2.5 BM25 + RRF hybrid fusion
+├── reranking.py       # v2.6 reranker contract
+├── multimodal.py      # AssetRef / SourceRef provenance
+├── context.py         # context selection / budgeting
+├── evals.py           # regression-gate foundation
 └── ...
 
 tests/
 ├── test_documents_chunking.py
 ├── test_embeddings_vector_index.py
+├── test_lexical_reranking.py
 └── ...
 ```
 
-## Why exact search stays in the project
+## Why retrieval and reranking remain separate
 
-ANN quality should be measured against a correctness baseline. `ExactVectorIndex` is intentionally simple and slow: it lets later retrieval tests ask whether an approximate index preserved enough of the true top-k set. This is also why `recall_at_k()` is already present before the dedicated retrieval-eval lessons.
+First-stage retrieval is optimized for candidate recall over a large corpus. Reranking is optimized for precision over a much smaller candidate set. Keeping those stages separate lets tests diagnose whether a relevant chunk was never recalled or was recalled but ranked too low.
 
 ## Next step
 
-RAG 05–06 add lexical BM25-style retrieval, dense+sparse hybrid fusion and reranking. Those layers will consume the same `Chunk` ids and return traceable `SearchHit` objects instead of inventing another document representation.
+RAG 07–08 add query rewriting/decomposition and evidence packing with citation provenance. Those modules will reuse the same chunk ids, retrieval traces and `SourceRef` chain instead of creating a second evidence representation.
