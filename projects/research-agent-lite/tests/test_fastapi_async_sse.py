@@ -8,6 +8,10 @@ from app.fastapi_worker import run_one_worker_tick
 from app.langgraph_production import ProductionGraphBridge
 
 
+OWNER_A = {"Authorization": "Bearer demo-owner-a"}
+OWNER_B = {"Authorization": "Bearer demo-owner-b"}
+
+
 def client_stack(*, max_events_per_run: int = 200):
     bridge = ProductionGraphBridge()
     events = InMemoryRunEventStore(max_events_per_run=max_events_per_run)
@@ -20,7 +24,7 @@ def test_v53_http_submission_stays_queued_until_separate_worker_executes_job() -
 
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "compare papers"},
     )
     assert created.status_code == 201
@@ -30,7 +34,7 @@ def test_v53_http_submission_stays_queued_until_separate_worker_executes_job() -
 
     before = client.get(
         f"/runs/{run_id}",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
     )
     assert before.json()["status"] == "queued"
 
@@ -41,7 +45,7 @@ def test_v53_http_submission_stays_queued_until_separate_worker_executes_job() -
 
     after = client.get(
         f"/runs/{run_id}",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
     )
     assert after.json()["status"] == "completed"
 
@@ -50,7 +54,7 @@ def test_v54_sse_replays_only_events_after_last_event_id() -> None:
     client, _, events = client_stack()
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "paper search"},
     ).json()
     run_id = created["id"]
@@ -66,10 +70,7 @@ def test_v54_sse_replays_only_events_after_last_event_id() -> None:
 
     response = client.get(
         f"/runs/{run_id}/stream?follow=false",
-        headers={
-            "X-Tenant-ID": "tenant-a",
-            "Last-Event-ID": "1",
-        },
+        headers={**OWNER_A, "Last-Event-ID": "1"},
     )
     assert response.status_code == 200
     assert "text/event-stream" in response.headers["content-type"]
@@ -84,7 +85,7 @@ def test_v54_sse_public_projection_does_not_dump_internal_run_or_graph_fields() 
     client, bridge, events = client_stack()
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "paper search", "approval_required": True},
     ).json()
     run_id = created["id"]
@@ -95,7 +96,7 @@ def test_v54_sse_public_projection_does_not_dump_internal_run_or_graph_fields() 
 
     response = client.get(
         f"/runs/{run_id}/stream?follow=false",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
     )
     assert response.status_code == 200
     assert "event: run_created" in response.text
@@ -111,13 +112,13 @@ def test_v54_cross_tenant_stream_lookup_is_not_enumerable() -> None:
     client, _, _ = client_stack()
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "private research"},
     ).json()
 
     response = client.get(
         f"/runs/{created['id']}/stream?follow=false",
-        headers={"X-Tenant-ID": "tenant-b"},
+        headers=OWNER_B,
     )
     assert response.status_code == 404
 
@@ -126,13 +127,13 @@ def test_v54_invalid_last_event_id_returns_400_before_stream_starts() -> None:
     client, _, _ = client_stack()
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "paper search"},
     ).json()
 
     response = client.get(
         f"/runs/{created['id']}/stream?follow=false",
-        headers={"X-Tenant-ID": "tenant-a", "Last-Event-ID": "not-an-int"},
+        headers={**OWNER_A, "Last-Event-ID": "not-an-int"},
     )
     assert response.status_code == 400
 
@@ -141,7 +142,7 @@ def test_v54_retention_gap_returns_conflict_instead_of_fake_complete_replay() ->
     client, _, events = client_stack(max_events_per_run=2)
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "paper search"},
     ).json()
     run_id = created["id"]
@@ -163,13 +164,13 @@ def test_v54_retention_gap_returns_conflict_instead_of_fake_complete_replay() ->
 
     response = client.get(
         f"/runs/{run_id}/stream?follow=false",
-        headers={"X-Tenant-ID": "tenant-a", "Last-Event-ID": "0"},
+        headers={**OWNER_A, "Last-Event-ID": "0"},
     )
     assert response.status_code == 409
     assert "no longer retained" in response.json()["detail"]
 
 
-def test_v54_openapi_documents_sse_route_and_last_event_id_header() -> None:
+def test_v56_openapi_documents_sse_route_last_event_id_and_bearer_auth() -> None:
     client, _, _ = client_stack()
     schema = client.get("/openapi.json").json()
     operation = schema["paths"]["/runs/{run_id}/stream"]["get"]
@@ -178,3 +179,4 @@ def test_v54_openapi_documents_sse_route_and_last_event_id_header() -> None:
     last_event = next(item for item in parameters if item["name"] == "Last-Event-ID")
     assert last_event["in"] == "header"
     assert last_event["required"] is False
+    assert operation["security"] == [{"BearerAuth": []}]
