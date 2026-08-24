@@ -14,11 +14,11 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 - 07 class, dataclass, mutable defaults, composition, AgentState · v0.7
 - 08 pytest, mock/fake, test layers, runnable Research Agent Lite · v1.0
 
-### LLM Application Engineering — 2/10 live
+### LLM Application Engineering — 4/10 live
 - 01 Model API / Request Lifecycle ✅
 - 02 Messages / Instructions / Conversation State ✅
-- 03 Tokens / Context Window / Context Engineering / Caching
-- 04 Generation & Reasoning Controls
+- 03 Tokens / Context Window / Context Engineering / Caching ✅
+- 04 Generation & Reasoning Controls ✅
 - 05 Streaming
 - 06 Structured Outputs
 - 07 Tool / Function Calling
@@ -54,7 +54,15 @@ Local verification during development: `4 passed`, and the CLI exercised one tra
 
 ## Project evolution
 
-Python closes at `Research Agent Lite v1.0`. The LLM track upgrades that same project into `Research Assistant v2.0` with a provider-abstracted model client, conversation/context management, streaming, structured outputs, one controlled tool call, model routing, usage accounting, and an eval suite.
+Python closes at `Research Agent Lite v1.0`. The LLM track upgrades that same project into `Research Assistant v2.0`.
+
+Current LLM increments:
+- v1.1 — provider-abstracted model client / request lifecycle
+- v1.2 — conversation state and message history
+- v1.3 — context builder, token budget, caching-aware layout
+- v1.4 — task-specific generation / reasoning profiles
+
+Planned next: streaming, structured outputs, one controlled tool call, model routing, usage accounting, and an eval suite.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
