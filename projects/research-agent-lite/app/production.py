@@ -17,7 +17,7 @@ class RunRecord(BaseModel):
     id: str = Field(min_length=1)
     tenant_id: str = Field(min_length=1)
     objective: str = Field(min_length=1)
-    status: RunStatus = RunStatus.PAUSED
+    status: RunStatus = RunStatus.QUEUED
     revision: int = Field(default=1, ge=1)
     budget: RunBudget = Field(default_factory=RunBudget)
     cancel_requested: bool = False
@@ -136,7 +136,7 @@ class ProductionControlPlane:
                 id=run_id,
                 tenant_id=tenant_id,
                 objective=objective,
-                status=RunStatus.PAUSED,
+                status=RunStatus.QUEUED,
                 budget=budget or RunBudget(),
             )
         )
@@ -153,11 +153,11 @@ class ProductionControlPlane:
 
     def claim(self, job: RunJob) -> ClaimResult:
         record = self.store.get(job.run_id, tenant_id=job.tenant_id)
-        if record.cancel_requested or record.status is RunStatus.CANCELLED:
-            return ClaimResult(accepted=False, reason="run is cancelled", record=record)
+        if record.cancel_requested or record.status in {RunStatus.CANCELLING, RunStatus.CANCELLED}:
+            return ClaimResult(accepted=False, reason="run is cancelled or cancelling", record=record)
         if record.revision != job.expected_revision:
             return ClaimResult(accepted=False, reason="stale or duplicate job delivery", record=record)
-        if record.status is not RunStatus.PAUSED:
+        if record.status is not RunStatus.QUEUED:
             return ClaimResult(
                 accepted=False,
                 reason=f"run is not claimable from status {record.status.value}",
@@ -173,13 +173,42 @@ class ProductionControlPlane:
 
     def request_cancel(self, run_id: str, *, tenant_id: str) -> RunRecord:
         current = self.store.get(run_id, tenant_id=tenant_id)
-        if current.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
+        if current.status in {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.STOPPED,
+            RunStatus.CANCELLED,
+        }:
             return current
+        if current.status is RunStatus.CANCELLING:
+            return current
+        immediate = current.status in {
+            RunStatus.QUEUED,
+            RunStatus.PAUSED,
+            RunStatus.WAITING_APPROVAL,
+        }
         return self.store.update(
             run_id,
             tenant_id=tenant_id,
             expected_revision=current.revision,
             cancel_requested=True,
+            status=RunStatus.CANCELLED if immediate else RunStatus.CANCELLING,
+        )
+
+    def acknowledge_cancel(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str,
+        expected_revision: int,
+    ) -> RunRecord:
+        current = self.store.get(run_id, tenant_id=tenant_id)
+        if current.status is not RunStatus.CANCELLING or not current.cancel_requested:
+            raise ValueError("run is not waiting for cancellation acknowledgement")
+        return self.store.update(
+            run_id,
+            tenant_id=tenant_id,
+            expected_revision=expected_revision,
             status=RunStatus.CANCELLED,
         )
 
@@ -194,7 +223,7 @@ class ProductionControlPlane:
     ) -> RunRecord:
         """Requeue a RUNNING run after an external lease/heartbeat watchdog fires."""
         current = self.store.get(run_id, tenant_id=tenant_id)
-        if current.cancel_requested or current.status is RunStatus.CANCELLED:
+        if current.cancel_requested or current.status in {RunStatus.CANCELLING, RunStatus.CANCELLED}:
             raise ValueError("cancelled run must not be requeued")
         if current.status is not RunStatus.RUNNING:
             raise ValueError("only an abandoned running run can be requeued")
@@ -206,7 +235,7 @@ class ProductionControlPlane:
             run_id,
             tenant_id=tenant_id,
             expected_revision=expected_revision,
-            status=RunStatus.PAUSED,
+            status=RunStatus.QUEUED,
             current_checkpoint_id=checkpoint_id,
         )
         self.queue.enqueue(
@@ -258,7 +287,7 @@ class ProductionControlPlane:
             run_id,
             tenant_id=tenant_id,
             expected_revision=current.revision,
-            status=RunStatus.PAUSED,
+            status=RunStatus.QUEUED,
             approval_request_id=None,
         )
         self.queue.enqueue(
