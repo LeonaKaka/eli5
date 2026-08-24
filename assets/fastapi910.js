@@ -3,7 +3,7 @@
 
   const healthOut=q('#healthOut');
   if(healthOut){
-    const state={started:false,closed:false,resources:{run_store:true,job_queue:true,graph_runtime:true,event_stream:true,analytics_sink:false}};
+    const state={started:false,closed:false,resources:{run_store:false,job_queue:false,graph_runtime:false,event_stream:false,analytics_sink:false}};
     const required=new Set(['run_store','job_queue','graph_runtime','event_stream']);
     const status=q('#healthStatus');
     const render=()=>{
