@@ -1,0 +1,55 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LLM 07 · Tool / Function Calling</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/llm12.css"><link rel="stylesheet" href="../assets/llm78.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 LLM<small>Application Engineering</small></div><div class="nav-label">LLM</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">LLM 07 · Research Assistant v1.7</span><h1>Tool Calling 最重要的事实：<br>模型不会真的“执行 Python”。</h1><p class="lead">模型做的是：<b>根据你提供的 tool schema，生成一个“请应用调用这个工具，并使用这些参数”的结构化请求。</b>真正联网、查数据库、删文件、发邮件的，永远是你的应用代码。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先把“模型会用工具”的魔法拆掉</h2><div class="sub">Tool Calling 是一个两段式协议：模型负责决定，应用负责执行。</div></div></div><div class="tool-pair"><div class="tool-card"><b>LLM 的职责</b><pre>tool_call:
+  name: search_papers
+  arguments:
+    query: "RAG evaluation"
+    top_k: 5</pre><p>它只产生“动作请求”。</p></div><div class="event-arrow">→</div><div class="tool-card"><b>你的应用的职责</b><pre>args = SearchArgs.model_validate(call.arguments)
+result = await search_papers(**args.model_dump())</pre><p>验证、授权、真正执行，再把结果返回模型。</p></div></div><div class="callout bad"><b>危险错觉：</b>“模型调用了 delete_file，所以文件是模型删的。”更准确地说，是你的程序看见模型提出 delete_file 请求后，选择了执行它。安全边界必须写在应用层。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Tool Schema 是给模型看的 API 菜单</h2><div class="sub">description 决定“什么时候用”，parameters 决定“怎么填参数”。</div></div></div><pre>{
+  "name": "search_papers",
+  "description": "Search academic papers relevant to a research question",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {"type": "string"},
+      "top_k": {"type": "integer", "minimum": 1, "maximum": 20}
+    },
+    "required": ["query"]
+  }
+}</pre><div class="grid3"><div class="card"><b>名字</b><p>短、稳定、动作导向：search_papers、get_weather。</p></div><div class="card"><b>Description</b><p>不仅解释“它是什么”，还要告诉模型适用边界和不适用场景。</p></div><div class="card"><b>Parameters</b><p>字段越模糊，模型越容易乱填；把类型、范围和必填项机器化。</p></div></div><div class="callout warn"><b>Tool description 不是营销文案。</b>如果两个工具描述高度重叠，模型会更难稳定路由。真正项目里要用 eval 看“选错工具率”，而不是凭感觉改 prompt。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive：模型提出动作后，到底经过哪些门？</h2><div class="sub">切换正常搜索、坏参数、危险动作和 timeout，观察 tool loop。</div></div></div><div class="tool-lab"><div class="tool-controls"><select id="toolScenario"><option value="search">正常：search_papers</option><option value="badargs">坏参数：top_k 类型错</option><option value="danger">危险动作：delete_repository</option><option value="timeout">Tool timeout</option></select><input id="toolQuery" value="RAG evaluation"><button class="btn primary" id="toolRun">运行 Tool Loop</button><button class="btn" id="toolReset">重置</button></div><div class="tool-stage"><div class="tool-step">① LLM<br>tool_call</div><div class="tool-step">② Schema<br>validate</div><div class="tool-step">③ Permission<br>policy</div><div class="tool-step">④ Python<br>execute</div><div class="tool-step">⑤ Result<br>→ LLM</div></div><div class="tool-console" id="toolConsole">点击“运行 Tool Loop”查看事件。</div></div><div class="callout"><b>你应该形成的工程顺序：</b>模型输出参数 → Pydantic/Schema 验证 → 权限/业务规则 → 执行 → 把结构化结果送回模型。不要把“模型生成了合法 JSON”当成“允许执行”。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Call ID 为什么重要？</h2><div class="sub">一个 response 可能有多个工具调用，结果必须准确回到对应调用。</div></div></div><div class="flow"><div class="node">tool_call<br><span class="call-id">call_A7f</span></div><span class="arrow">→</span><div class="node">search_papers()</div><span class="arrow">→</span><div class="node">tool_result<br><span class="call-id">call_A7f</span></div><span class="arrow">→</span><div class="node">LLM 继续推理</div></div><p>不要仅凭工具名关联结果：同一轮里模型可能两次调用 <code class="inline">search_papers</code>，参数完全不同。Call ID 是协议层关联键，也是日志和 trace 的好入口。</p><pre>ToolCall(
+    id="call_A7f",
+    name="search_papers",
+    arguments={"query": "RAG", "top_k": 5},
+)
+
+ToolResult(
+    call_id="call_A7f",
+    ok=True,
+    output={"papers": [...]},
+)</pre></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>安全不是“在 Prompt 里告诉模型不要乱来”</h2><div class="sub">真正权限控制必须由应用自己做。</div></div></div><div class="permission-grid"><div class="perm safe"><b>🟢 Read-only</b><p>搜索论文、读天气、查询数据库。通常可以自动执行，但仍需参数/资源范围限制。</p></div><div class="perm confirm"><b>🟠 Side effect</b><p>发邮件、创建日历事件、写数据库。常常需要明确规则、幂等和用户确认。</p></div><div class="perm block"><b>🔴 Destructive / Sensitive</b><p>删除数据、转账、修改权限、执行任意 shell。默认禁止或强审批。</p></div></div><div class="callout bad"><b>Prompt Injection 进入 Tool Calling 后危险性会升级。</b>网页里的恶意文字如果能诱导模型调用“发送 secret”工具，而应用又无权限层，问题就从“答错一句话”升级成真实副作用。</div><div class="flow"><div class="node">Untrusted content</div><span class="arrow">→</span><div class="node">LLM proposes action</div><span class="arrow">→</span><div class="node"><b>Policy / Approval</b></div><span class="arrow">→</span><div class="node">Only then execute</div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Tool Error 也应该是“数据”，不是一律崩异常</h2><div class="sub">模型需要知道工具失败了，才能决定换路、重试或解释。</div></div></div><pre>{
+  "call_id": "call_A7f",
+  "ok": false,
+  "error": {
+    "type": "timeout",
+    "message": "search service timed out",
+    "retryable": true
+  }
+}</pre><div class="grid3"><div class="card"><b>Invalid args</b><p>不执行，告诉模型参数哪里不符合 schema。</p></div><div class="card"><b>Transient failure</b><p>应用可有限 retry，或把 error result 返回模型做 fallback。</p></div><div class="card"><b>Permanent / denied</b><p>不要让模型无限请求同一动作；明确告诉它“此路不可用”。</p></div></div><div class="callout warn"><b>不要把所有工具异常都原样喂给模型。</b>内部 stack trace、数据库 DSN、文件系统路径可能包含敏感信息。返回的是“模型需要做下一步决策所需的最小错误结构”。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>一次 Tool Call 和真正 Agent Loop 的区别</h2><div class="sub">Tool Calling 是能力；Agent 是让模型在状态和停止条件里反复决定下一步。</div></div></div><div class="loop-ring"><div class="loop-node">LLM<span>判断下一步</span></div><div class="loop-node">Tool Call<span>请求动作</span></div><div class="loop-node">Execute<span>应用执行</span></div><div class="loop-node">Observation<span>结果回模型</span></div></div><p>如果只允许一次搜索然后回答，这是一个受控的 tool-assisted workflow；如果模型可以连续搜索 → 读文件 → 算数 → 再搜索，直到满足停止条件，就开始接近真正 Agent Loop。</p><div class="callout">后面的 Agent 能力线会深入：state、max steps、checkpoint、memory、human-in-the-loop、guardrails。现在先把“单次/少量受控 Tool Calling”学扎实。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>并行 Tool Calls：能并行，不代表都该并行</h2><div class="sub">独立读操作可以并行，有依赖或副作用的动作要谨慎。</div></div></div><table class="table"><tr><th>两个调用</th><th>是否适合并行</th><th>原因</th></tr><tr><td>search_arxiv(A) + search_web(A)</td><td>通常可以</td><td>互相独立、都是读操作</td></tr><tr><td>create_order() + charge_card()</td><td>通常不该盲并行</td><td>存在业务依赖与副作用</td></tr><tr><td>read_file(A) + read_file(B)</td><td>通常可以</td><td>独立 I/O</td></tr><tr><td>delete_old() + migrate_data()</td><td>危险</td><td>顺序和失败恢复都很关键</td></tr></table><div class="callout">这正好复用了 Python 05 的 async 思维：<b>并发是执行策略，不是模型“更聪明”。</b>应用层必须决定哪些 call 可以安全并发。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v1.7：ToolRegistry + ToolExecutor</h2><div class="sub">模型只看规范化 tool spec；真正 Python 函数藏在 registry 后面。</div></div></div><pre>registry.register(
+    ToolSpec(
+        name="search_papers",
+        description="Search academic papers",
+        args_model=SearchArgs,
+        permission=Permission.READ_ONLY,
+    ),
+    handler=search_papers,
+)
+
+call = ToolCall.model_validate(model_output)
+result = await executor.execute(call)</pre><div class="flow"><div class="node">Provider Tool Call</div><span class="arrow">→</span><div class="node">Normalized ToolCall</div><span class="arrow">→</span><div class="node">Registry</div><span class="arrow">→</span><div class="node">Validate + Policy</div><span class="arrow">→</span><div class="node">Python Handler</div></div><div class="exercise"><b>练习</b><p>如果模型请求 <code>send_email(to, body)</code>，schema 完全合法，但收件人不在用户允许名单里，你应该执行吗？</p><details><summary>参考</summary><p>不应该。Schema 只说明参数形状合法；授权/业务 policy 是另一层。对有副作用的动作还可能要求用户显式确认。</p></details></div><div class="quiz" data-quiz><h4>哪句话最准确？</h4><button class="option" data-feedback="模型只请求动作，执行发生在应用层。">A. Tool Calling 意味着模型进程直接运行 Python</button><button class="option" data-correct="1">B. 模型生成结构化动作请求，应用验证、授权并执行后把结果返回模型</button><button class="option" data-feedback="Schema validation 与权限控制是两层不同边界。">C. 参数通过 JSON Schema 就可以无条件执行</button><div class="feedback"></div></div><div class="callout interview"><b>面试验收：</b>① Tool Calling 与 Tool Execution 区别？② Tool schema 的 description 为什么重要？③ call id 解决什么问题？④ 为什么 schema valid 仍需 permission check？⑤ prompt injection 在 tool 场景为什么更危险？⑥ 工具 timeout 应该怎么返回？⑦ 哪些 calls 适合并行？⑧ 单次 tool workflow 与 Agent loop 有什么区别？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="llm07">我能设计一个验证、授权、执行、回传完整分层的 Tool Calling 流程</label></div></section><div class="footer">下一课：模型输入不再只有字符串。我们看图片、PDF、音频进入系统前到底发生了什么。</div></main></div><script src="../assets/app.js"></script><script src="../assets/llm-nav.js"></script><script src="../assets/llm78.js"></script></body></html>
