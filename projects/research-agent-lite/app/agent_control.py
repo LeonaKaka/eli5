@@ -6,10 +6,12 @@ from pydantic import BaseModel, Field
 
 
 class RunStatus(StrEnum):
+    QUEUED = "queued"
     RUNNING = "running"
     WAITING_TOOL = "waiting_tool"
     WAITING_APPROVAL = "waiting_approval"
     PAUSED = "paused"
+    CANCELLING = "cancelling"
     COMPLETED = "completed"
     STOPPED = "stopped"
     FAILED = "failed"
