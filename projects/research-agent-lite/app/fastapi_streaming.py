@@ -13,6 +13,8 @@ class RunEventType(StrEnum):
     RUN_CREATED = "run_created"
     PROGRESS = "progress"
     APPROVAL_REQUIRED = "approval_required"
+    APPROVAL_RESOLVED = "approval_resolved"
+    CANCEL_REQUESTED = "cancel_requested"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     ERROR = "error"
