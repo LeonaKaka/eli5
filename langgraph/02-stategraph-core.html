@@ -1,0 +1,58 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LangGraph 02 · StateGraph Core</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/langgraph12.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Graph<small>LangChain / LangGraph</small></div><div class="nav-label">Framework Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">02 · Research Assistant v4.2</span><h1>StateGraph 的核心不是“画流程图”。<br>而是让 State 的变化和控制流都有明确规则。</h1><p class="lead">一个 Graph 真正难的不是 `add_node()`，而是三个问题：<b>State 里到底放什么？Node 只返回哪些 update？多个 update 遇到同一个字段时怎么 merge？</b>这就是 reducer。搞不清 reducer，图可以跑，但状态迟早会被悄悄覆盖。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先看这条最小心智模型</h2><div class="sub">LangGraph 官方 Graph API 也是围绕 State / Nodes / Edges 三件事组织。</div></div></div><div class="flow"><div class="node">State</div><span class="arrow">→</span><div class="node">Node</div><span class="arrow">→</span><div class="node">Partial Update</div><span class="arrow">→</span><div class="node">Reducer</div><span class="arrow">→</span><div class="node">New State</div></div><div class="callout"><b>Edge 决定下一个 Node；Reducer 决定 update 怎样并入 State。</b>这是两个完全不同的职责。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>一个 Node 不应该每次返回整个 State</h2><div class="sub">返回它真正改变的字段即可。</div></div></div><pre>def classify_request(state: ResearchGraphState):
+    return {
+        "route": "research",
+        "events": ["classify:research"],
+        "step_count": state["step_count"] + 1,
+    }</pre><p>这里没有返回 `objective / evidence / answer`，它们仍留在 State 里。LangGraph 把这个结果当作一个 <b>state update</b>，再按字段的 reducer 规则应用。</p><div class="callout">如果每个 Node 都手工复制整个 State，你会重新发明一套容易漏字段、覆盖字段的 reducer。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive：State Transition Lab</h2><div class="sub">切换 research / direct，然后一步一步执行真实 v4.2 的同构流程。</div></div></div><div class="state-lab"><div class="route-tabs"><button class="btn active" data-route="research">research route</button><button class="btn" data-route="direct">direct route</button><button class="btn primary" id="stateNext">执行下一 Node</button><button class="btn" id="stateReset">Reset</button></div><div class="state-stage"><div class="state-node" data-state-node="classify"><b>classify</b><small>设置 route</small></div><span class="arrow">→</span><div class="state-node" data-state-node="research"><b>research / direct</b><small>条件分支</small></div><span class="arrow">→</span><div class="state-node" data-state-node="synthesize"><b>synthesize</b><small>汇合后生成 answer</small></div></div><div class="state-inspector"><div><b>Current State</b><pre class="state-json" id="stateJson"></pre></div><div><b>Graph Runtime</b><pre class="state-log" id="stateLog"></pre></div></div></div><div class="callout"><b>注意看 `events`：</b>每个 Node 只返回一个新事件，但 State 最后会保留整个事件序列，因为它使用 append reducer。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Reducer 是 merge semantics</h2><div class="sub">默认不是 append，而是 overwrite。</div></div></div><div class="reducer-tabs"><button class="btn active" data-reducer-mode="overwrite">默认 overwrite</button><button class="btn" data-reducer-mode="append">Annotated + add</button></div><div class="reducer-demo"><div class="reducer-box"><b>State schema</b><pre>class State(TypedDict):
+    answer: str | None
+    events: Annotated[list[str], add]</pre><p>`answer` 没 reducer → 新 update 覆盖旧值。`events` 有 `operator.add` → list 拼接。</p></div><div class="reducer-box"><b>现场结果</b><pre id="reducerOutput" class="reducer-after">旧: ["classify"]
+新 update: ["research"]
+结果: ["research"]
+
+默认 reducer 会覆盖旧值。</pre></div></div><div class="callout warn"><b>最危险的 bug：</b>你以为两个并行 Node 都在“追加结果”，但字段没有 reducer，于是其中一个 update 把另一个覆盖掉。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>State 不是 Messages 的同义词</h2><div class="sub">Conversation 只是 State 的一种可能字段。</div></div></div><pre>class ResearchGraphState(TypedDict):
+    objective: str
+    route: Literal["research", "direct"] | None
+    evidence: Annotated[list[str], add]
+    events: Annotated[list[str], add]
+    step_count: int
+    answer: str | None</pre><p>你前面 Agent 课程已经见过同样原则：控制面状态不应该全塞进聊天记录。Graph State 可以包含 messages，也可以包含 route、evidence ids、budget counters、plan revision、approval refs 等。</p><div class="callout">LangGraph 提供 `MessagesState`，适合“messages 是核心状态”的应用；但复杂 Research Assistant 更应该扩展它或定义自己的 State，而不是把所有业务字段序列化进 system message。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Fixed Edge 和 Conditional Edge</h2><div class="sub">一个是确定下一步，一个是让路由函数读取 State 决定下一步。</div></div></div><div class="api-compare"><div class="api-panel"><b>Fixed</b><pre>builder.add_edge(
+    "research",
+    "synthesize",
+)</pre><p>research 完成后永远进入 synthesize。</p></div><div class="api-panel"><b>Conditional</b><pre>builder.add_conditional_edges(
+    "classify",
+    route_after_classify,
+    {
+      "research": "research",
+      "direct": "direct",
+    },
+)</pre><p>分类结果成为显式控制流，而不是藏在某个 Node 内部继续调用函数。</p></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>`START` / `END` 不是装饰</h2><div class="sub">它们给 Graph 一个明确入口和终止边界。</div></div></div><pre>builder.add_edge(START, "classify")
+...
+builder.add_edge("synthesize", END)</pre><div class="callout">前面你手写 `AgentLoop` 时，start/stop 是 while-loop 外层代码；Graph 里它们成为图结构的一部分。之后 checkpoint、stream、interrupt 都会依赖这个执行模型。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>为什么必须 `compile()`？</h2><div class="sub">Builder 只是图定义，compiled graph 才是 runnable runtime。</div></div></div><pre>builder = StateGraph(ResearchGraphState)
+# add nodes / edges ...
+
+graph = builder.compile()
+result = graph.invoke(initial_state)</pre><p>官方文档把 compile 描述成构建后的必要步骤：它会做基本结构检查，同时也是未来注入 checkpointer / breakpoint 等 runtime 配置的地方。</p><div class="callout">把它理解成：<b>Graph definition → validated executable runtime</b>，而不是 Python 语法上的多余仪式。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v4.2：第一次真正有 Graph State</h2><div class="sub">项目不是页面模拟，源码已经使用 `StateGraph`。</div></div></div><pre>graph = build_research_state_graph()
+
+result = graph.invoke(
+    initial_research_state(
+        "compare paper A and paper B",
+        mode="research",
+    )
+)
+
+assert result["events"] == [
+    "classify:research",
+    "research",
+    "synthesize",
+]</pre><p>这条测试同时锁住三件事：conditional route 生效、`events/evidence` reducer 保留累积结果、direct 分支会跳过 research 但重新汇合到 synthesis。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2><div class="sub">如果只能说“Node 是函数、Edge 是箭头”，还不够。</div></div></div><div class="quiz" data-quiz><h4>两个 Node 都返回 `{"documents": [new_doc]}`，你希望最后 documents 累积两个结果。最关键要检查什么？</h4><button class="option" data-feedback="并发多少不决定 merge 语义。">A. 把 worker 数调成 1</button><button class="option" data-correct="1">B. `documents` 字段是否定义了正确 reducer；否则默认可能是 overwrite</button><button class="option" data-feedback="模型大小不决定 State merge。">C. 换更强模型</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① State / Node / Edge / Reducer 分别负责什么？② Node 为什么返回 partial update？③ 默认 reducer 是什么？④ `MessagesState` 适合什么，不适合什么？⑤ conditional edge 与 Node 内部 if/调用下游函数相比有什么可观测性优势？⑥ compile 阶段做什么？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="langgraph02">我能设计 typed Graph State、Reducer 和条件路由</label></div></section><div class="footer">下一批：03 LangChain Tools / ToolNode + 04 Conditional Flow / Command / Send。</div></main></div><script src="../assets/app.js"></script><script src="../assets/langgraph-nav.js"></script><script src="../assets/langgraph12.js"></script></body></html>
