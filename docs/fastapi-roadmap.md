@@ -4,7 +4,7 @@ Scope: expose Research Assistant v5.0 as a real HTTP service without collapsing 
 
 Current reference line: FastAPI 0.141.x, Pydantic v2.
 
-Current progress: **02 / 10 live**, Research Assistant **v5.2**.
+Current progress: **04 / 10 live**, Research Assistant **v5.4**.
 
 ## 01 — API Boundary / ASGI / First Run API ✅
 Build the first real service around the existing product run lifecycle. Understand ASGI request/response boundaries, `FastAPI()`, path operations, `POST /runs`, `GET /runs/{run_id}`, 201/200/404 semantics and automatic OpenAPI. The HTTP request only submits work; it does not execute a long Agent run inline.
@@ -12,11 +12,11 @@ Build the first real service around the existing product run lifecycle. Understa
 ## 02 — Pydantic Contracts / Depends / Tenant Context ✅
 Use explicit request/response models, `Annotated + Depends`, header-derived tenant context and response filtering. Keep internal fields such as tenant identifiers, checkpoint ids and budgets out of the public response model. Treat tenant context as an authorization input, not as trusted business data merely because it came from a header.
 
-## 03 — Async Boundary / Worker Separation
-Understand `async def`, blocking I/O, threadpool behavior and why an async endpoint is not a background-job system. Preserve the Queue/Worker boundary for long Agent runs and map synchronous adapters safely.
+## 03 — Async Boundary / Worker Separation ✅
+Understand `async def`, blocking I/O, FastAPI threadpool behavior and why async syntax is not a background-job system. Keep long Agent execution behind Queue/Worker. Short blocking adapters may use explicit thread offload; `BackgroundTasks` is not presented as durable multi-worker execution.
 
-## 04 — SSE Streaming
-Expose run progress as Server-Sent Events. Design event ids/types, heartbeat/disconnect behavior, backpressure expectations and a stable projection from LangGraph/product events to a client-safe stream contract.
+## 04 — SSE Streaming ✅
+Expose `/runs/{run_id}/stream` with native `EventSourceResponse` / `ServerSentEvent`. Use stable client-safe event types, sequence ids, `Last-Event-ID` replay, disconnect awareness and bounded retention. A retention gap is explicit rather than silently dropping history; raw Graph/debug/control-plane state is never the public stream schema.
 
 ## 05 — Approval / Cancel / Idempotent Commands
 Add approval and cancellation endpoints. Model repeated commands, revision/precondition checks, 409/412-style conflicts, idempotency keys and safe retries for HTTP clients.
@@ -40,8 +40,8 @@ Close Research Assistant at v6.0: API → auth/dependencies → RunStore → Que
 Continue `projects/research-agent-lite/` from Research Assistant v5.0:
 - v5.1 first FastAPI application + POST/GET Run endpoints ✅
 - v5.2 Pydantic public contracts + tenant dependency boundary ✅
-- v5.3 async/worker boundary
-- v5.4 SSE streaming
+- v5.3 async request / worker lifetime separation ✅
+- v5.4 native SSE / Last-Event-ID / safe event projection ✅
 - v5.5 approval/cancel/idempotent command API
 - v5.6 auth/security/CORS
 - v5.7 error model/exception handlers
@@ -50,4 +50,4 @@ Continue `projects/research-agent-lite/` from Research Assistant v5.0:
 - v6.0 production Agent API architecture
 
 ## Teaching rule
-HTTP convenience must not erase system boundaries. A FastAPI endpoint should not directly run long-lived Agent work merely because it can be declared `async`. Tenant/run authorization, optimistic revisions, durable queueing, Graph replay safety, approval identity and cancellation remain explicit contracts.
+HTTP convenience must not erase system boundaries. A FastAPI endpoint should not directly run long-lived Agent work merely because it can be declared `async`. Tenant/run authorization, optimistic revisions, durable queueing, Graph replay safety, approval identity, cancellation and event retention remain explicit contracts.
