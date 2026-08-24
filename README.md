@@ -20,18 +20,23 @@ API lifecycle → conversation state → context → generation → streaming �
 Full scope: `docs/llm-app-roadmap.md`.
 
 ### RAG Engineering — 10/10 complete
-- 01 Document Parsing / Document Model / OCR / provenance ✅
-- 02 Chunking / overlap / structure-aware boundaries / stable ids ✅
-- 03 Embeddings / cosine / dot / L2 / model compatibility ✅
-- 04 Vector DB / Exact / ANN / HNSW / filters ✅
-- 05 BM25 / lexical retrieval / RRF hybrid fusion ✅
-- 06 Reranking / candidate recall / two-stage retrieval ✅
-- 07 Query Rewrite / Multi-query / decomposition / routing ✅
-- 08 Citation / Evidence Packing / provenance / dedup ✅
-- 09 Retrieval Eval / Precision@K / Recall@K / MRR / nDCG / slices ✅
-- 10 End-to-End RAG Eval / groundedness / citation / failure taxonomy / gate ✅
+Document parsing → chunking → embeddings → ANN/HNSW → BM25/hybrid → reranking → query planning → evidence/citation → retrieval eval → end-to-end RAG eval.
 
 Full scope: `docs/rag-roadmap.md`.
+
+### Agent Engineering — 2/10 live
+- 01 Agent Loop / observe → decide → act → update → stop/continue ✅
+- 02 State Machine / Stop Conditions / Run Budgets / LoopGuard ✅
+- 03 Planning / Replanning
+- 04 Memory Architecture / Write Policy
+- 05 Multi-step Tool Orchestration
+- 06 Human-in-the-loop / Guardrails / Approval
+- 07 Recovery / Durable Execution
+- 08 Multi-Agent / Handoff / Supervisor
+- 09 Observability / Trajectory Eval
+- 10 Production Agent Architecture
+
+Full scope: `docs/agent-roadmap.md`.
 
 ## Teaching contract
 Every lesson must include:
@@ -44,35 +49,24 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, and the RAG track closes at **Research Assistant v3.0**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and the Agent track is now at **Research Assistant v3.2**.
 
 ```bash
 cd projects/research-agent-lite
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-python -m app.main "RAG evaluation" --top-k 3
 pytest -q
 ```
 
-## Current RAG project increments
+## Current Agent project increments
 
-- v2.1 — structured `Document` ingestion boundary
-- v2.2 — structure-aware `ChunkPolicy` / `Chunk`
-- v2.3 — `EmbeddingProvider` / versioned vector-space contract
-- v2.4 — Exact baseline + educational graph ANN
-- v2.5 — real offline BM25 baseline + `reciprocal_rank_fusion()`
-- v2.6 — `Reranker` boundary with first-stage rank preserved through reranking
-- v2.7 — explicit `QueryPlan`, preserving original intent while separating search queries and synthesis
-- v2.8 — `EvidencePacker` / `EvidencePack` / `CitationRef`, with budget, source caps, near-duplicate suppression and provenance-derived citations
-- v2.9 — `RetrievalEvaluator` with Precision@K / Recall@K / Hit Rate / MRR / nDCG and tag-level slice reports
-- v3.0 — `RAGEvaluator` with retrieval/evidence/groundedness/citation metrics and failure-layer diagnosis
+- v3.1 — `AgentDecision`, `AgentObservation`, `AgentContext`, `AgentLoop`, `AgentRunResult`, trajectory trace
+- v3.2 — `RunStatus`, `StopReason`, `RunBudget`, `AgentControlState`, `LoopGuard`
 
-The toy embedding, graph ANN, keyword-overlap reranker and rule-based query planner are deterministic teaching adapters. They validate architecture and failure boundaries offline; they are not presented as production semantic models, HNSW, cross-encoders or LLM query planners.
+The first Agent lessons deliberately reuse the existing `ToolExecutor` permission boundary. A model may propose the next action, but execution, budgets and hard stop conditions remain application-side.
 
-## Next track
-
-Agent Engineering: agent loop, explicit state transitions, stopping conditions, memory, planning, tool selection, guardrails, human approval and durable execution.
+Framework-specific orchestration is intentionally deferred. LangGraph comes in the next capability track after the underlying loop/state/checkpoint problems are understood.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
