@@ -27,15 +27,15 @@ StateGraph → ToolNode → Command/Send → persistence → interrupt/resume �
 
 Full scope: `docs/langchain-langgraph-roadmap.md`.
 
-### FastAPI — 6/10 live
-- 01 API boundary / ASGI / `POST /runs` / `GET /runs/{id}` / OpenAPI ✅
+### FastAPI — 8/10 live
+- 01 API boundary / Run resources / OpenAPI ✅
 - 02 Pydantic contracts / dependencies / response filtering ✅
-- 03 async boundary / blocking SDK / threadpool / durable Worker separation ✅
-- 04 native SSE / `Last-Event-ID` / reconnect / retention / safe event projection ✅
+- 03 async boundary / blocking SDK / durable Worker separation ✅
+- 04 native SSE / reconnect / retention / safe projection ✅
 - 05 approval / cancel / ETag / `If-Match` / `Idempotency-Key` ✅
-- 06 Bearer authentication / Principal permissions / tenant derivation / CORS / proxy trust ✅
-- 07 Errors / Exception handlers
-- 08 Testing / Dependency overrides / OpenAPI contract
+- 06 Bearer / Principal permissions / tenant scope / CORS / proxy trust ✅
+- 07 ProblemDetails / exception handlers / request correlation / safe 500s ✅
+- 08 TestClient / dependency overrides / integration vs unit / OpenAPI contract ✅
 - 09 Lifespan / Health / Readiness
 - 10 Production Agent API Architecture
 
@@ -46,7 +46,7 @@ Every lesson must include a concrete engineering problem, visual/explorable expl
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, LangChain / LangGraph at v5.0, and FastAPI now evolves it toward **Research Assistant v6.0**. Current level: **v5.6**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, LangChain / LangGraph at v5.0, and FastAPI now evolves it toward **Research Assistant v6.0**. Current level: **v5.8**.
 
 ```bash
 cd projects/research-agent-lite
@@ -61,16 +61,16 @@ Current framework/service dependencies follow the course reference lines: `langc
 
 ## FastAPI project evolution
 
-- v5.1 — first FastAPI Run resource API
+- v5.1 — Run resource API
 - v5.2 — request/response contracts and dependency boundaries
-- v5.3 — HTTP request lifetime separated from durable Worker lifetime
-- v5.4 — native SSE + safe Run event projection + Last-Event-ID replay
-- v5.5 — approval/cancel commands use ETag/If-Match and atomic teaching idempotency registry
-- v5.6 — Bearer authentication derives Principal/tenant; route permissions, explicit credentialed CORS and proxy trust boundaries
+- v5.3 — HTTP request lifetime separated from Worker lifetime
+- v5.4 — native SSE + safe event projection + replay/retention
+- v5.5 — ETag/If-Match + idempotent approval/cancel commands
+- v5.6 — Bearer Principal / permissions / tenant derivation / CORS
+- v5.7 — ProblemDetails + exception handlers + request correlation
+- v5.8 — dependency overrides + layered HTTP/integration/OpenAPI contract tests
 
-The API now derives tenant scope from authenticated identity instead of trusting `X-Tenant-ID`. Demo bearer tokens are provider-free teaching credentials only; production must validate real identity-provider/session/API-key material. CORS is configured as a browser-origin policy and is not treated as authorization.
-
-Mutating commands require both optimistic revision preconditions and idempotency keys. The in-memory idempotency/event/auth adapters exist for deterministic teaching; multi-replica production needs durable shared implementations and atomic command reservation.
+The API preserves the earlier durable architecture: FastAPI owns HTTP contracts; product control-plane owns tenant/run/revision/commands; Queue/Workers own durable execution; LangGraph owns Graph state/checkpoints/interrupts. Uniform errors and fast tests do not erase those boundaries.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. The static learning UI requires no backend or secret.
