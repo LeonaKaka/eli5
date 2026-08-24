@@ -71,9 +71,10 @@ def test_unnecessary_steps_and_bad_handoff_block_even_without_policy_violation()
     assert not report.healthy
 
 
-def test_submit_and_claim_use_revision_to_reject_duplicate_delivery() -> None:
+def test_submit_and_claim_use_queued_state_and_revision_to_reject_duplicate_delivery() -> None:
     control = ProductionControlPlane()
     submitted = control.submit(run_id="run-1", tenant_id="tenant-a", objective="research")
+    assert submitted.status is RunStatus.QUEUED
     job = control.queue.pop()
     assert job is not None and job.kind is JobKind.START
     assert submitted.revision == job.expected_revision
@@ -99,6 +100,34 @@ def test_cancel_before_worker_claim_prevents_execution() -> None:
     claimed = control.claim(job)
     assert not claimed.accepted
     assert "cancelled" in claimed.reason
+
+
+def test_running_cancel_is_two_phase_until_worker_acknowledges_safe_boundary() -> None:
+    control = ProductionControlPlane()
+    control.submit(run_id="run-cancel", tenant_id="tenant-a", objective="long tool task")
+    start = control.queue.pop()
+    assert start is not None
+    running = control.claim(start)
+    assert running.accepted
+
+    cancelling = control.request_cancel("run-cancel", tenant_id="tenant-a")
+    assert cancelling.status is RunStatus.CANCELLING
+    assert cancelling.cancel_requested
+
+    with pytest.raises(ValueError, match="only a running run can complete"):
+        control.finish(
+            "run-cancel",
+            tenant_id="tenant-a",
+            expected_revision=running.record.revision,
+            trace_events=99,
+        )
+
+    cancelled = control.acknowledge_cancel(
+        "run-cancel",
+        tenant_id="tenant-a",
+        expected_revision=cancelling.revision,
+    )
+    assert cancelled.status is RunStatus.CANCELLED
 
 
 def test_run_store_is_tenant_scoped() -> None:
@@ -132,15 +161,15 @@ def test_approval_pause_and_resume_enqueue_exact_run_revision() -> None:
             approval_request_id="approval:wrong",
         )
 
-    paused = control.enqueue_resume_after_approval(
+    queued = control.enqueue_resume_after_approval(
         "run-4",
         tenant_id="tenant-a",
         approval_request_id="approval:call-9",
     )
-    assert paused.status is RunStatus.PAUSED
+    assert queued.status is RunStatus.QUEUED
     resume = control.queue.pop()
     assert resume is not None and resume.kind is JobKind.RESUME
-    assert resume.expected_revision == paused.revision
+    assert resume.expected_revision == queued.revision
     assert control.claim(resume).accepted
 
 
@@ -160,7 +189,7 @@ def test_abandoned_running_run_is_requeued_with_new_revision_and_checkpoint() ->
         checkpoint_id="run-5:checkpoint-7",
         attempt=2,
     )
-    assert abandoned.status is RunStatus.PAUSED
+    assert abandoned.status is RunStatus.QUEUED
     assert abandoned.current_checkpoint_id == "run-5:checkpoint-7"
     assert abandoned.revision > running.record.revision
 
