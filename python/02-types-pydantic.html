@@ -1,0 +1,44 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Python 02 · 函数、Type Hint、Pydantic</title><link rel="stylesheet" href="../assets/styles.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Python<small>for AI Agent Engineering</small></div><div class="nav-label">Python</div><nav class="nav"><a href="../"><span class="num">⌂</span>课程首页</a><a href="01-basics.html"><span class="num">01</span>数据积木与执行</a><a class="active" href="02-types-pydantic.html"><span class="num">02</span>函数与数据契约</a></nav><div class="progress-box"><div class="progress-row"><span>首批课程进度</span><span id="progressPct">0%</span></div><div class="progress"><i id="progressBar"></i></div></div></aside><main class="content"><section class="hero"><span class="kicker">Python 02 · Research Agent v0.2</span><h1>“能传参数”还不够。<br>系统得知道什么数据才算合法。</h1><p class="lead">AI 工程里到处都是边界：用户 → API、LLM → Tool、Tool → 数据库。<b>函数签名、Type Hint、Pydantic</b>就是在这些边界上规定数据“应该长什么样”。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先制造一个真实 bug：top_k = "很多"</h2><div class="sub">如果不在入口检查，错误会一路流进系统内部，最后才在很远的地方炸。</div></div></div><div class="flow"><div class="node">用户输入<br>top_k="很多"</div><span class="arrow">→</span><div class="node">search()</div><span class="arrow">→</span><div class="node">切片 / DB query</div><span class="arrow">→</span><div class="node">💥 难定位</div></div><div class="code-wrap"><button class="copy">复制</button><pre>def search_papers(query, top_k):
+    results = ["A", "B", "C"]
+    return results[:top_k]
+
+search_papers("RAG", "很多")</pre></div><div class="callout bad"><b>核心问题：</b>错误数据进入系统太深。好的工程倾向于在“边界”尽早验证，失败位置离问题来源越近越好。</div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>函数签名 = 一台机器门口的说明牌</h2><div class="sub">名字、参数、默认值、返回值，共同告诉别人“怎么正确调用我”。</div></div></div><div class="timeline"><div class="step active"><div class="dot">1</div><div class="body"><b>最模糊</b><code class="inline">def search(query, top_k):</code><p>能运行，但读代码的人得自己猜类型和返回值。</p></div></div><div class="step active"><div class="dot">2</div><div class="body"><b>加入默认值</b><code class="inline">top_k=5</code><p>说明这个参数可选，并给出常规行为。</p></div></div><div class="step active"><div class="dot">3</div><div class="body"><b>加入 Type Hint</b><code class="inline">query: str, top_k: int = 5 -&gt; list[str]</code><p>接口一眼可读，IDE / 类型检查器也能工作。</p></div></div></div><div class="code-wrap"><button class="copy">复制</button><pre>def search_papers(
+    query: str,
+    top_k: int = 5,
+) -&gt; list[str]:
+    ...</pre></div><div class="callout warn"><b>但注意：</b>Type Hint 默认不是运行时门卫。你写 <code>top_k: int</code>，Python 仍可能收到字符串。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>亲手试：Type Hint 不能替代 Validation</h2><div class="sub">下面模拟一个 Pydantic Request Model。改 JSON，然后点“验证”。</div></div></div><div class="lab"><div class="lab-title">Interactive · Request Validation</div><div class="validator"><div><textarea id="jsonInput">{
+  "query": "RAG evaluation",
+  "top_k": 5
+}</textarea><div class="controls"><button class="btn primary" id="validateBtn">验证这个请求</button></div></div><div class="result" id="validationResult"><b>等待验证</b><br><br>试着把 <code>top_k</code> 改成 <code>"很多"</code>、0、50，观察错误应该在哪一层被挡住。</div></div></div><h3>对应的 Pydantic 模型</h3><div class="code-wrap"><button class="copy">复制</button><pre>from pydantic import BaseModel, Field
+
+class SearchRequest(BaseModel):
+    query: str
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+    )</pre></div><table class="table"><tr><th>东西</th><th>职责</th></tr><tr><td><code>query: str</code></td><td>类型契约：query 应该是字符串</td></tr><tr><td><code>top_k: int</code></td><td>类型契约：top_k 应该是整数</td></tr><tr><td><code>ge=1, le=20</code></td><td>业务约束：即使是整数，也必须在合理范围</td></tr></table></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>为什么 AI 工程特别依赖 Schema？</h2><div class="sub">因为 LLM 本身是不确定的，而工具和 API 通常要求确定的数据结构。</div></div></div><div class="flow"><div class="node">LLM<br>自由文本能力</div><span class="arrow">→</span><div class="node">Schema<br>规定形状</div><span class="arrow">→</span><div class="node">Validation<br>检查合法</div><span class="arrow">→</span><div class="node">Python Tool<br>确定执行</div></div><div class="grid3"><div class="card"><div class="emoji">🛠️</div><b>Tool Calling</b><p>工具参数必须能解析成明确字段，不是让模型写一段“差不多像参数”的自然语言。</p></div><div class="card"><div class="emoji">📤</div><b>Structured Output</b><p>让模型返回明确结构，便于程序继续消费，而不是人工阅读。</p></div><div class="card"><div class="emoji">⚡</div><b>FastAPI</b><p>HTTP 请求进入后自动按模型验证，错误尽早返回给调用者。</p></div></div><div class="callout"><b>所以 Pydantic 不只是“Python 小知识”。</b>它是你后面理解 FastAPI request model、LLM structured output、tool schema 的共同底座。</div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>代码应该怎么一步步长出来？</h2><div class="sub">不要一上来就背完整框架。先看每一步到底解决了哪个新问题。</div></div></div><div class="timeline"><div class="step active"><div class="dot">1</div><div class="body"><b>只求能跑</b><pre>def search_papers(query, top_k):
+    ...</pre></div></div><div class="step active"><div class="dot">2</div><div class="body"><b>让接口可读</b><pre>def search_papers(
+    query: str,
+    top_k: int = 5,
+) -&gt; list[str]:
+    ...</pre></div></div><div class="step active"><div class="dot">3</div><div class="body"><b>给外部输入加验证</b><pre>request = SearchRequest.model_validate(data)</pre></div></div><div class="step active"><div class="dot">4</div><div class="body"><b>只把干净数据交给核心函数</b><pre>results = search_papers(
+    request.query,
+    request.top_k,
+)</pre></div></div></div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>错误示范：把“所有东西”都做成 Pydantic</h2><div class="sub">数据验证很重要，但不是每个内部临时变量都需要一个 Model。</div></div></div><div class="grid2"><div class="card"><b>适合 Pydantic</b><p>用户输入、API request/response、LLM structured output、Tool 参数、配置。</p></div><div class="card"><b>普通 Python 就够</b><p>函数内部临时 list、只在一个小函数中使用的局部变量、没有外部边界的数据。</p></div></div><div class="callout warn"><b>工程判断：</b>“哪里需要严格契约”比“Pydantic 用得越多越专业”重要。过度建模同样会让代码变重。</div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Research Agent v0.2：把搜索请求变成可靠接口</h2><div class="sub">现在 v0.1 的筛选逻辑前面，多了一层清楚的数据入口。</div></div></div><div class="code-wrap"><button class="copy">复制</button><pre>from pydantic import BaseModel, Field
+
+class SearchRequest(BaseModel):
+    query: str
+    top_k: int = Field(default=5, ge=1, le=20)
+
+def handle_search(raw_data: dict) -&gt; list[str]:
+    request = SearchRequest.model_validate(raw_data)
+
+    return search_papers(
+        query=request.query,
+        top_k=request.top_k,
+    )</pre></div><div class="exercise"><b>练习 A</b><p>增加一个可选字段 <code class="inline">year_from: int | None = None</code>。</p><details><summary>参考答案</summary><pre>class SearchRequest(BaseModel):
+    query: str
+    top_k: int = Field(default=5, ge=1, le=20)
+    year_from: int | None = None</pre></details></div><div class="exercise"><b>练习 B · 找 bug</b><p>下面这个设计的问题在哪里？</p><pre>def search_papers(request: SearchRequest):
+    return database.query(request)</pre><details><summary>思考方向</summary><p>不一定“错”，但核心搜索层被 Pydantic/HTTP 边界模型绑死了。很多项目更愿意让 core function 接普通 Python 参数，把 validation 留在边界层，这样复用/测试更轻。</p></details></div><div class="callout interview"><b>面试验收：</b>① Type Hint 与运行时 Validation 的区别？② 为什么 AI Structured Output 要 schema？③ Pydantic 为什么很适合 FastAPI？④ ge/le 是类型约束还是业务约束？⑤ 什么情况下不值得建一个 BaseModel？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="python02">我能独立解释并做完本课练习</label></div></section><div class="footer">下一课计划：Python 工程结构——module、package、imports、pyproject、env，以及把 Research Agent 拆成可维护项目。</div></main></div><script src="../assets/app.js"></script></body></html>
