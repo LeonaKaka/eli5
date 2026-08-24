@@ -1,0 +1,60 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Python 03 · Module、Package 与项目结构</title><link rel="stylesheet" href="../assets/styles.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Python<small>for AI Agent Engineering</small></div><div class="nav-label">Python</div><nav class="nav"><a href="../"><span class="num">⌂</span>课程首页</a><a href="01-basics.html"><span class="num">01</span>数据积木与执行</a><a href="02-types-pydantic.html"><span class="num">02</span>函数与数据契约</a><a class="active" href="03-project-structure.html"><span class="num">03</span>模块与项目结构</a><a href="04-http-json-api.html"><span class="num">04</span>HTTP · JSON · API</a></nav><div class="progress-box"><div class="progress-row"><span>Python 进度</span><span id="progressPct">0%</span></div><div class="progress"><i id="progressBar"></i></div></div></aside><main class="content"><section class="hero"><span class="kicker">Python 03 · Research Agent v0.3</span><h1>代码能跑，<br>不等于它已经是“工程”。</h1><p class="lead">当 Research Agent 从 80 行长到 800 行，真正的问题不再是“Python 会不会写”，而是：<b>代码放哪里、谁依赖谁、别人能不能快速找到它。</b></p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先制造痛苦：一个 main.py 里塞所有东西</h2><div class="sub">模型调用、PDF 解析、数据模型、搜索、Agent loop、配置，全在同一个文件。</div></div></div><div class="goal"><b>本课目标：</b>你能把单文件 Agent 拆成职责明确的 package，并解释每个目录为什么存在，而不是照抄模板。</div><div class="code-wrap"><button class="copy">复制</button><pre># main.py —— 真实项目很快就会变成这样
+API_KEY = "..."
+
+class SearchRequest: ...
+
+def parse_pdf(...): ...
+def search_papers(...): ...
+def call_llm(...): ...
+def retry(...): ...
+def run_agent(...): ...
+def save_history(...): ...
+
+def main(): ...</pre></div><div class="callout bad"><b>它不是因为“行数多”才坏。</b>真正的问题是职责混在一起：改 LLM client 时你得穿过 Agent 逻辑；改输入 schema 时又可能碰到 PDF 代码。每个修改都扩大了误伤范围。</div><div class="grid3"><div class="card"><div class="emoji">🔎</div><b>难找</b><p>你知道函数存在，但不知道它藏在哪 900 行里。</p></div><div class="card"><div class="emoji">🧪</div><b>难测</b><p>想测 search，却顺手 import 了 LLM、配置和数据库。</p></div><div class="card"><div class="emoji">🧨</div><b>难改</b><p>模块边界不清，任何重构都像在拆一团电线。</p></div></div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Module 和 Package：先把“房间”和“楼层”分清</h2><div class="sub">不要死背定义，先看它们解决什么组织问题。</div></div></div><div class="grid2"><div class="card"><div class="emoji">🚪</div><b>Module = 一个 .py 文件</b><p><code class="inline">search.py</code> 就是一个 module。它最好围绕一组相关行为。</p></div><div class="card"><div class="emoji">🏢</div><b>Package = 一组相关 modules</b><p><code class="inline">tools/</code> 把 search.py、pdf.py、calculator.py 组织在一起。</p></div></div><div class="callout">你可以把 <b>module 理解成办公室</b>，package 是一层楼。目的不是“目录看着整齐”，而是让职责和依赖边界变得清楚。</div><h3>一个最小但健康的 Research Agent</h3><div class="project-tree" id="projectTree"><button data-file="main"><span>📄</span> app/main.py</button><button data-file="agent"><span>🧠</span> app/agents/research_agent.py</button><button data-file="search"><span>🔎</span> app/tools/search.py</button><button data-file="pdf"><span>📄</span> app/tools/pdf.py</button><button data-file="models"><span>📐</span> app/models/schemas.py</button><button data-file="llm"><span>🔌</span> app/services/llm.py</button><button data-file="tests"><span>🧪</span> tests/test_search.py</button><button data-file="config"><span>⚙️</span> pyproject.toml / .env</button></div><div class="file-explain" id="fileExplain"><b>点一个文件。</b><p>右边会告诉你它为什么应该放这里，以及什么东西不该塞进来。</p></div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>真正重要的是“依赖方向”，不是目录长得漂亮</h2><div class="sub">一个好结构让高层编排依赖底层能力，而不是所有模块互相 import。</div></div></div><div class="dependency-map"><div class="dep top"><b>agents/</b><span>决定流程：什么时候搜索、什么时候问模型</span></div><div class="dep-arrow">↓ 调用</div><div class="dep-row"><div class="dep"><b>tools/</b><span>执行搜索、PDF、计算</span></div><div class="dep"><b>services/</b><span>LLM / DB / 外部 client</span></div><div class="dep"><b>models/</b><span>稳定的数据结构</span></div></div></div><div class="callout warn"><b>坏味道：</b><code class="inline">tools/search.py</code> 反过来 import <code class="inline">agents/research_agent.py</code>。工具层突然知道了上层 Agent，依赖方向开始打结。</div><div class="quiz" data-quiz><h4>哪一种依赖更健康？</h4><button class="option" data-correct="1">A. Agent 调 SearchTool；SearchTool 不知道 Agent 存在</button><button class="option" data-feedback="这会让底层工具依赖上层业务，很容易形成循环 import。">B. SearchTool import Agent，根据 Agent 类型决定怎么搜索</button><button class="option" data-feedback="全部互相 import 最终通常会变成循环依赖和难测试结构。">C. tools / agents / services 互相 import，反正能跑就行</button><div class="feedback"></div></div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>import 到底发生了什么？</h2><div class="sub">它不是“复制粘贴另一个文件”，而是让当前模块获得另一个模块暴露的名字。</div></div></div><div class="code-wrap"><button class="copy">复制</button><pre># app/agents/research_agent.py
+from app.tools.search import search_papers
+from app.services.llm import get_llm
+
+
+def run_agent(question: str):
+    papers = search_papers(question)
+    llm = get_llm()
+    return llm.summarize(papers)</pre></div><div class="flow"><div class="node">research_agent.py</div><span class="arrow">import</span><div class="node">tools/search.py</div><span class="arrow">拿到</span><div class="node">search_papers</div></div><h3>为什么会有 circular import？</h3><div class="cycle-demo"><div class="cycle-box">agent.py<br><small>import search</small></div><div class="cycle-arrow">→</div><div class="cycle-box danger">search.py<br><small>又 import agent</small></div><div class="cycle-arrow">↩</div></div><p>Python 正在初始化 agent.py 时跑去初始化 search.py；search.py 又要求一个“还没初始化完”的 agent.py。循环就出现了。</p><div class="callout"><b>修 circular import 最好的第一反应：</b>不要先想“怎么绕开 import 语法”，先问职责是不是放错了。共享数据模型可抽到 models；公共能力可抽到更底层模块。</div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2><code>__init__.py</code>、<code>__main__</code>、运行入口：先学够用的</h2><div class="sub">这些名字容易吓人，但对 Agent 项目只需要先掌握最常用部分。</div></div></div><table class="table"><tr><th>东西</th><th>先这样理解</th><th>现在需要会什么</th></tr><tr><td><code>__init__.py</code></td><td>package 初始化文件 / 明确包边界</td><td>知道它可以为空，也可以重导出少量公共接口</td></tr><tr><td><code>if __name__ == "__main__"</code></td><td>“直接运行这个文件时才执行”</td><td>避免 import 时顺手启动整个程序</td></tr><tr><td><code>python -m app.main</code></td><td>以 module 方式从项目根执行</td><td>比在子目录乱跑脚本更不容易破坏 import 路径</td></tr></table><div class="code-wrap"><button class="copy">复制</button><pre># app/main.py
+from app.agents.research_agent import run_agent
+
+
+def main():
+    answer = run_agent("RAG evaluation")
+    print(answer)
+
+
+if __name__ == "__main__":
+    main()</pre></div><div class="callout bad"><b>常见新手坑：</b>为了“让 import 能用”，到处手改 <code class="inline">sys.path</code>。很多时候真正问题是你不在项目根运行、package 结构不对，或者安装方式不对。</div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>pyproject.toml、虚拟环境、.env：它们不是杂项</h2><div class="sub">一个工程除了 Python 文件，还得说明“我依赖什么、怎么安装、运行时配置从哪来”。</div></div></div><div class="grid3"><div class="card"><div class="emoji">📦</div><b>pyproject.toml</b><p>项目元数据、Python 版本、依赖、工具配置。别人拿到仓库才知道该装什么。</p></div><div class="card"><div class="emoji">🫧</div><b>.venv</b><p>给这个项目独立的 Python 环境，不让全局包版本互相污染。</p></div><div class="card"><div class="emoji">🔐</div><b>.env</b><p>本地运行时配置。API key 可以从环境读取，但 <b>.env 本身不要 commit</b>。</p></div></div><div class="code-wrap"><button class="copy">复制</button><pre># pyproject.toml（示意）
+[project]
+name = "research-agent-lite"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2",
+  "httpx>=0.27",
+]
+
+# .gitignore
+.env
+.venv/
+__pycache__/</pre></div><div class="callout warn"><b>为什么这和求职有关？</b>面试官 clone 你的仓库，第一感受不是“算法多高级”，而是它能不能很快安装、运行、定位结构。</div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>互动：一段代码应该搬去哪？</h2><div class="sub">真正会项目结构，不是会背目录名，而是会做职责判断。</div></div></div><div class="role-lab" id="roleLab"><div class="snippet"><b>代码片段</b><pre id="roleSnippet">def parse_pdf(path: str):
+    ...</pre><div class="controls"><button class="btn" data-role-choice="agents">agents/</button><button class="btn" data-role-choice="tools">tools/</button><button class="btn" data-role-choice="models">models/</button><button class="btn" data-role-choice="services">services/</button></div></div><div class="result" id="roleResult"><b>先选一个目录。</b><p>判断标准：它是在“决定流程”、执行一个能力、定义数据形状，还是封装外部服务？</p></div></div></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Research Agent v0.3：从脚本变成真正的小项目</h2><div class="sub">前两课的逻辑没有丢，只是被放到了更清楚的位置。</div></div></div><div class="code-wrap"><button class="copy">复制</button><pre>research_agent_lite/
+├── pyproject.toml
+├── .gitignore
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── agents/
+│   │   └── research_agent.py
+│   ├── models/
+│   │   └── schemas.py
+│   ├── tools/
+│   │   ├── search.py
+│   │   └── pdf.py
+│   └── services/
+│       └── llm.py
+└── tests/
+    └── test_search.py</pre></div><div class="exercise"><b>练习 A · 重构</b><p>把一个同时包含 <code>SearchRequest</code>、<code>search_papers()</code>、<code>call_llm()</code>、<code>run_agent()</code> 的 main.py 拆到上面的目录。</p><details><summary>参考拆法</summary><p><code>SearchRequest → models/schemas.py</code>；<code>search_papers → tools/search.py</code>；<code>call_llm → services/llm.py</code>；<code>run_agent → agents/research_agent.py</code>；main.py 只负责启动。</p></details></div><div class="exercise"><b>练习 B · 找架构 bug</b><p><code>tools/search.py</code> 里 import <code>run_agent</code>，因为搜索失败后“想让 Agent 决定怎么办”。为什么不理想？</p><details><summary>思考方向</summary><p>错误恢复决策属于上层编排。SearchTool 更适合返回明确结果/异常，让 Agent 决定 retry、fallback 或停止，而不是工具反向控制 Agent。</p></details></div><div class="callout interview"><b>面试验收：</b>① module 与 package 的区别？② 为什么要分 agents/tools/services/models？③ circular import 通常暴露什么架构问题？④ 为什么不建议到处修改 sys.path？⑤ pyproject.toml 和虚拟环境分别解决什么？⑥ API key 为什么不写进源码？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="python03">我能独立解释并重构成本课结构</label></div></section><div class="footer">下一课：这个项目第一次走出本机——HTTP / JSON / API，以及 Python 到底怎样“打电话”给模型。</div></main></div><script src="../assets/app.js"></script></body></html>
