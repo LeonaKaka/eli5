@@ -85,6 +85,9 @@ def test_loop_guard_stops_repeated_identical_action_before_third_execution() -> 
     assert result.stop_reason is StopReason.REPEATED_ACTION
     assert result.tool_calls == 2
     assert calls == 2
+    # The third proposal is blocked before execution but still remains visible in the trajectory.
+    assert [event.kind for event in result.trace][-2:] == ["decision", "stop"]
+    assert "rare topic" in result.trace[-2].detail
 
 
 def test_loop_guard_enforces_max_steps_even_when_actions_keep_changing() -> None:
