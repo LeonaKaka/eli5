@@ -1,8 +1,8 @@
-# Research Assistant v5.8
+# Research Assistant v6.0
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-Python closed at **v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.0**, Agent Engineering at **v4.0**, LangChain / LangGraph at **v5.0**, and the FastAPI track now evolves the same system toward **v6.0**.
+Python closed at **v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.0**, Agent Engineering at **v4.0**, LangChain / LangGraph at **v5.0**, and FastAPI now closes the backend architecture at **v6.0**.
 
 ## FastAPI increments
 
@@ -14,10 +14,12 @@ Python closed at **v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.
 - **v5.6** — `HTTPBearer`, Principal permissions, tenant derivation, CORS and proxy-trust boundaries
 - **v5.7** — stable `ProblemDetails`, request correlation, validation/HTTP/500 exception handlers and documented error responses
 - **v5.8** — dependency overrides, endpoint-unit vs integration boundaries and selective OpenAPI contract tests
+- **v5.9** — FastAPI lifespan resource ownership plus separate liveness/readiness probes and partial-start cleanup
+- **v6.0** — final service composition root and deployment-profile audit that refuses process-local teaching adapters when the caller claims production
 
 Current FastAPI reference line used by the course: `fastapi>=0.141,<1` with Pydantic v2.
 
-## Run
+## Run teaching profile
 
 ```bash
 python -m venv .venv
@@ -27,9 +29,19 @@ pytest -q
 uvicorn app.fastapi_app:app --reload
 ```
 
+The default `app.fastapi_app:app` remains the provider-free teaching service. The explicit v6 composition root is:
+
+```python
+from app.fastapi_service import build_service, DeploymentProfile
+
+app = build_service(profile=DeploymentProfile.TEACHING)
+```
+
 Current public routes:
 
 ```text
+GET  /health/live
+GET  /health/ready
 POST /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/stream
@@ -49,12 +61,14 @@ demo-owner-b   → tenant-b · read/create/approve/cancel
 
 ```text
 app/
-├── fastapi_app.py               # routes / SSE / commands / CORS / error wiring
+├── fastapi_app.py               # routes / SSE / commands / health / CORS / error wiring
 ├── fastapi_worker.py            # separate Worker adapter
 ├── fastapi_streaming.py         # client-safe event log/schema
 ├── fastapi_commands.py          # ETag / If-Match / Idempotency-Key
 ├── fastapi_security.py          # Bearer / Principal / permission dependencies
 ├── fastapi_errors.py            # ProblemDetails / request id / exception handlers
+├── fastapi_lifecycle.py         # lifespan / resource ownership / live + ready
+├── fastapi_service.py           # v6 composition root / deployment profile audit
 ├── langgraph_production.py      # product control-plane ↔ LangGraph bridge
 └── production.py                # tenant RunStore / Queue / optimistic revisions
 
@@ -63,46 +77,69 @@ tests/
 ├── test_fastapi_async_sse.py
 ├── test_fastapi_commands_security.py
 ├── test_fastapi_errors_testing.py
+├── test_fastapi_lifecycle_production.py
 └── ...
 ```
 
-## v5.7 public error boundary
+## Public error and HTTP control boundary
 
-All client-facing errors now use a stable Problem Details-style schema:
+All client-facing errors use the stable Problem Details-style schema introduced in v5.7. Mutating commands keep their distinct safety mechanisms:
 
-```json
-{
-  "type": "urn:research-assistant:problem:precondition_failed",
-  "title": "Precondition failed",
-  "status": 412,
-  "detail": "Run revision changed: ...",
-  "instance": "/runs/run-42/cancel",
-  "code": "precondition_failed",
-  "request_id": "req-..."
-}
+- Bearer Principal → identity / tenant / action permission
+- `If-Match` → stale-client protection against Run revision
+- `Idempotency-Key` → network retry replay without second side effect
+- approval request id → bind a human decision to one exact paused action
+- `request_id` → private telemetry correlation only; never identity or authorization
+
+## Lifespan / health boundary
+
+`RuntimeResourceManager` owns process-scoped resources. Startup opens them once; shutdown closes them once. If startup fails partway through, resources that already started are closed before the exception escapes.
+
+Operational probes are intentionally different:
+
+```text
+/health/live  → is this process/event loop alive enough to answer?
+/health/ready → should the load balancer send new production traffic here?
 ```
 
-`RequestValidationError` is projected to sanitized location/message/type issues instead of echoing the raw request body. FastAPI/Starlette HTTP exceptions keep their meaningful status codes and protocol headers such as `WWW-Authenticate`. Unexpected 500s return a generic public detail; real exception text and traces belong in private telemetry correlated by `request_id`.
+A required queue/storage/checkpoint dependency can make readiness return 503 while liveness remains 200. Optional dependencies may be degraded without removing the whole API from traffic when product policy allows it.
 
-Runtime exception handlers and OpenAPI documentation are separate responsibilities. The app therefore installs handlers **and** declares `ProblemDetails` through path-operation `responses=`.
+## v6.0 deployment profile gate
 
-## v5.8 testing boundary
+The course intentionally keeps deterministic in-memory adapters so the whole system can run without external infrastructure. `DeploymentProfile.PRODUCTION` therefore audits the composition before app creation.
 
-FastAPI dependency injection is also the test seam. Endpoint-unit tests can override `get_current_principal` and `get_bridge` with deterministic fakes when the test only cares about routing, authorization wiring, response projection or ETag behavior.
+The default teaching stack is rejected as production because it still contains process-local state such as:
 
-That does **not** replace integration tests. Queue delivery, optimistic revision, idempotency, LangGraph interrupt/resume and tenant isolation stay real in tests when those mechanisms are the thing being verified. Over-mocking them would produce fast tests that prove only the fake behavior.
+```text
+InMemoryRunStore
+InMemoryRunQueue
+LangGraph InMemorySaver
+InMemoryRunEventStore
+InMemoryIdempotencyStore
+DemoTokenAuthenticator
+process-local approval/resume metadata in ProductionGraphBridge
+```
 
-OpenAPI contract tests selectively lock externally important structure: Bearer security, command headers, `ProblemDetails`, important response codes and route existence. They intentionally avoid snapshotting every generated OpenAPI detail.
+This is deliberate. A Docker image that contains only these adapters can start, but it is not horizontally scalable or restart-safe. The next Docker/deployment track replaces these with durable/shared implementations rather than relabeling them production.
 
-## Existing safety boundaries still apply
+## Final ownership model
 
-- tenant comes from authenticated Principal, not a client-supplied tenant header
-- CORS is not authorization
-- ETag preconditions and idempotency keys solve different retry/concurrency problems
-- SSE connection lifetime is not Run ownership
-- FastAPI does not replace durable Queue/Worker claims, LangGraph checkpoints, replay safety or side-effect idempotency
-- a request id is correlation metadata, not identity or authorization
+```text
+FastAPI / application
+  HTTP contracts · auth · tenant · Run resource · command policy
+
+RunStore / Queue / Worker control plane
+  product status · revision · cancellation · delivery · worker claim
+
+LangGraph
+  graph state · checkpoint · interrupt · resume semantics
+
+External tool / infrastructure
+  durable DB/queue/checkpointer/event log · downstream idempotency · identity provider
+```
+
+SSE is a client-safe projection, not authoritative Run state. LangGraph checkpoints are execution state, not tenant authorization. Queue delivery is not the Run database. Those boundaries remain explicit at v6.0.
 
 ## Next step
 
-FastAPI 09–10: lifespan/resource ownership + liveness/readiness, then close the backend at Research Assistant **v6.0** with the final production Agent API architecture.
+The backend learning line is closed at v6.0. The next core job-skill track is **Docker / containerization and multi-service deployment**: externalize the process-local adapters, containerize API/worker separately, add networking/config/secrets/volumes, then validate restart and multi-replica behavior.
