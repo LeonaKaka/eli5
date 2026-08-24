@@ -77,12 +77,17 @@ class ProductionGraphBridge:
     LangGraph handles graph checkpoints and interrupts. ProductionControlPlane
     remains authoritative for tenant scope, queue delivery, optimistic worker
     revisions, cancellation and whether an approval may enqueue a resume.
+
+    The in-memory ``_approval_required`` registry is teaching metadata only. A
+    production service should persist such per-run policy metadata in its Run DB;
+    it must not be hidden inside the objective string or inferred from prompts.
     """
 
     def __init__(self, *, control: ProductionControlPlane | None = None) -> None:
         self.control = control or ProductionControlPlane()
         self.checkpointer = InMemorySaver()
         self.graph = build_production_graph(checkpointer=self.checkpointer)
+        self._approval_required: dict[tuple[str, str], bool] = {}
         self._resume_values: dict[tuple[str, str], bool] = {}
 
     @staticmethod
@@ -99,12 +104,13 @@ class ProductionGraphBridge:
         objective: str,
         approval_required: bool = False,
     ) -> RunRecord:
-        marker = "approval:" if approval_required else "direct:"
-        return self.control.submit(
+        record = self.control.submit(
             run_id=run_id,
             tenant_id=tenant_id,
-            objective=f"{marker}{objective}",
+            objective=objective,
         )
+        self._approval_required[(tenant_id, run_id)] = approval_required
+        return record
 
     def execute_job(self, job: RunJob) -> GraphRunOutcome:
         claim = self.control.claim(job)
@@ -121,12 +127,11 @@ class ProductionGraphBridge:
         config = {"configurable": {"thread_id": thread_id}}
 
         if job.kind is JobKind.START:
-            approval_required = record.objective.startswith("approval:")
-            objective = record.objective.split(":", 1)[1]
+            key = (record.tenant_id, record.id)
             result = self.graph.invoke(
                 {
-                    "objective": objective,
-                    "approval_required": approval_required,
+                    "objective": record.objective,
+                    "approval_required": self._approval_required.get(key, False),
                     "events": [],
                     "result": "",
                 },
