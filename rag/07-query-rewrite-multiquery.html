@@ -28,7 +28,7 @@ resolved query:
 # plan.original_query
 # plan.search_queries
 # plan.strategy
-# plan.version
+# plan.planner_version
 # plan.requires_synthesis</pre><div class="callout">后面的 retrieval trace 可以明确记录：哪条 search query 命中了哪条 chunk，最终证据是从哪一路 query 进来的。</div></section>
 <section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2><div class="sub">重点是知道什么时候该改写、什么时候不该。</div></div></div><div class="quiz" data-quiz><h4>用户问“比较 A/B 方法”，rewrite 后变成“比较 A/B 的室温器件方法”。最严重的问题是什么？</h4><button class="option" data-feedback="表达更长不是核心风险。">A. Query 太长</button><button class="option" data-correct="1">B. Rewrite 引入了原问题不存在的“室温”约束，发生 intent drift</button><button class="option" data-feedback="Embedding 仍然可以算，问题在语义变了。">C. 无法生成 embedding</button><div class="feedback"></div></div><div class="callout interview"><b>面试验收：</b>① rewrite / multi-query / decomposition 区别？② 什么是 rewrite drift？③ 指代消解为什么应在 retrieval 前做？④ Multi-query 的收益和成本？⑤ query routing 怎么利用 lexical/dense/metadata？⑥ 怎么评估 intent preservation？⑦ 为什么复杂比较题不一定适合单次检索？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="rag07">我能设计并评估一个不会随意改题的 Query Planner</label></div></section>
 <div class="footer">下一课：证据已经捞到了，怎么在有限 context 里打包成可验证、可点击、不过度重复的 citation evidence？</div></main></div><script src="../assets/app.js"></script><script src="../assets/rag-nav.js"></script><script src="../assets/rag78.js"></script></body></html>
