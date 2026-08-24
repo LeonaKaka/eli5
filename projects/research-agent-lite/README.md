@@ -1,21 +1,23 @@
-# Research Assistant v4.6
+# Research Assistant v4.8
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
 Python closed at **Research Agent Lite v1.0**. LLM Application Engineering upgraded the same codebase to **Research Assistant v2.0**. RAG closed at **Research Assistant v3.0**. Agent Engineering closed at **Research Assistant v4.0**. The LangChain / LangGraph track now migrates the same project toward v5.0.
 
-Current project level: **v4.6**.
+Current project level: **v4.8**.
 
 ## Framework track increments
 
-- **v4.1** — `BridgeState`, `build_bridge_graph()` and the first real compiled LangGraph
-- **v4.2** — `ResearchGraphState`, reducers, fixed/conditional edges and branch rejoin
+- **v4.1** — first real compiled `StateGraph`
+- **v4.2** — typed graph state, reducers, fixed/conditional edges and branch rejoin
 - **v4.3** — `@tool search_papers`, `ToolNode`, `tools_condition`, real `AIMessage.tool_calls` and correlated `ToolMessage.tool_call_id`
 - **v4.4** — `Command(update=..., goto=...)` and `Send` dynamic fan-out/map-reduce with reducer-based fan-in
 - **v4.5** — `PersistenceState`, `InMemorySaver`, `thread_config()`, real thread-scoped checkpoints, `get_state()`, `get_state_history()` and `update_state()`
 - **v4.6** — `ApprovalState`, real `interrupt()` + `Command(resume=...)`, safe approval graph and deliberately unsafe pre-interrupt replay demo
+- **v4.7** — `MemoryContext`, `InMemoryStore`, `Runtime[MemoryContext]`, namespace design, cross-thread recall, `MemoryWritePolicy` gating and explicit invalidation
+- **v4.8** — shared-state subgraph composition, private-state wrapper mapping, and deterministic subgraph → parent sibling handoff with `Command.PARENT`
 
-The project depends on `langchain>=1.3,<2` and `langgraph>=1.2,<2`. Lessons 01–06 do not call any external model provider and therefore do not require an API key.
+The project depends on `langchain>=1.3,<2` and `langgraph>=1.2,<2`. Lessons 01–08 do not call any external model provider and therefore do not require an API key.
 
 ## Run
 
@@ -35,15 +37,9 @@ app/
 ├── langgraph_control_flow.py    # v4.4 Command + Send / dynamic fan-out and fan-in
 ├── langgraph_persistence.py     # v4.5 checkpointer, thread config, checkpoint history
 ├── langgraph_interrupts.py      # v4.6 interrupt / resume / replay-safe approval layout
-├── agent_loop.py                # manual v3.1 observe / decide / act / update loop
-├── agent_control.py             # run statuses, budgets, stop reasons, queue/cancel states
-├── planning.py                  # explicit plan graph + replan trigger policy
-├── memory.py                    # memory types, write gate, scope, invalidation
-├── orchestration.py             # dependency waves, output bindings, partial joins
-├── approval.py                  # application approval policy remains independent
-├── durable.py                   # replay-safety and reconciliation contracts
-├── multi_agent.py               # typed handoff, ownership, routing, cycle guard
-├── trajectory_eval.py           # process-level Agent metrics and trace integrity
+├── langgraph_store.py           # v4.7 Store, Runtime context, namespace + memory policy
+├── langgraph_subgraphs.py       # v4.8 shared/private subgraphs + Command.PARENT handoff
+├── memory.py                    # application memory kinds, scope, write gate, invalidation
 ├── production.py                # tenant RunStore, Queue, worker revisions, cancel/requeue/resume
 └── ...
 
@@ -51,28 +47,32 @@ tests/
 ├── test_langgraph_basics.py
 ├── test_langgraph_tools_control.py
 ├── test_langgraph_persistence_interrupts.py
-├── test_agent_loop_control.py
-├── test_planning_memory.py
-├── test_orchestration_approval.py
-├── test_durable_multi_agent.py
-├── test_trajectory_production.py
+├── test_langgraph_store_subgraphs.py
 └── ...
 ```
 
-## Persistence boundary
+## Store boundary
 
-`InMemorySaver` demonstrates the real LangGraph checkpointer contract but is intentionally non-durable across process restarts. A checkpointer stores graph-state snapshots by `thread_id`; `get_state()` returns the latest `StateSnapshot`, and `get_state_history()` exposes historical checkpoints newest-first. `update_state()` creates another checkpoint rather than mutating an old snapshot in place.
+The checkpointer persists graph state inside one `thread_id`; the Store persists application-defined items across threads. v4.7 compiles a graph with both an `InMemorySaver` and an `InMemoryStore`, and injects `user_id/workspace_id` through a typed Runtime context. User/workspace namespace design is explicit.
 
-Checkpointer state is **not** the same thing as the v4.0 product control plane. Tenant authorization, queue delivery, worker leases/revisions, cancellation and product-level run ownership still belong outside the graph unless deliberately integrated. Cross-thread durable facts belong to a Store, which is covered in lesson 07.
+The Store is **not** the policy layer. Writes still pass through the original `MemoryWritePolicy`: sensitive data, working memory, unverified semantic facts, low-confidence information, or data without demonstrated cross-run reuse value can be rejected. Run-scoped information is kept in thread/checkpoint state rather than promoted into the cross-thread Store.
 
-## Interrupt boundary
+The adapter also rejects silent reuse of the same memory key. Corrections use an explicit invalidation path instead of silently changing an old memory's meaning. A real production store may additionally need immutable versions/audit history.
 
-`interrupt()` requires a checkpointer and a stable `thread_id`. The payload is surfaced to the caller, and resuming with `Command(resume=value)` injects that value back as the return value of `interrupt()`.
+## Subgraph boundary
 
-The interrupted node restarts from its beginning when resumed. Therefore code before `interrupt()` must be pure, idempotent or otherwise replay-safe. `build_unsafe_pre_interrupt_graph()` intentionally demonstrates a duplicated side effect during pause/resume; `build_approval_graph()` moves the side effect into a downstream node after approval.
+v4.8 demonstrates three different composition contracts:
 
-Interrupt persistence is not an authorization policy. The application still decides which actions require approval, who can approve them, how an approval is bound to an exact action, and how side effects are reconciled after ambiguous external outcomes.
+1. **Shared state keys** — a compiled subgraph can be passed directly to `add_node`; shared channels flow between parent and child while child-only scratch does not become parent business state.
+2. **Different/private schemas** — a wrapper node explicitly maps parent input into child state and maps only selected child output back.
+3. **Parent handoff** — a retriever subgraph returns `Command(graph=Command.PARENT, goto="writer_agent", update=...)`, passing a minimal handoff payload to a sibling parent node instead of copying all private scratch/history.
+
+Subgraph persistence is a separate choice: default `checkpointer=None` is per-invocation, `True` is per-thread persistent child state, and `False` is stateless. Per-thread subgraphs require care with parallel calls because multiple writes to the same child checkpoint namespace can conflict.
+
+## What still remains outside the framework
+
+Store namespaces do not replace tenant authorization. Subgraph routing does not replace ownership/capability policy. `Command.PARENT` does not automatically validate handoff context or preserve tool-call message pairs. Product RunStore/Queue/lease/cancellation semantics, side-effect replay safety, approval policy and regression gates remain explicit application/infrastructure contracts.
 
 ## Next step
 
-LangChain / LangGraph 07–08 add cross-thread Store-backed long-term memory and subgraph/multi-agent composition. That is where thread-local graph state starts interacting with durable user/workspace memory and specialist graph boundaries.
+LangChain / LangGraph 09–10 add middleware, streaming/observability, then reconcile the framework runtime with the v4.0 production control plane and close Research Assistant at v5.0.
