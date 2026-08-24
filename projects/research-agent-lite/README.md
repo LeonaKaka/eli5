@@ -1,21 +1,19 @@
-# Research Assistant v2.2
+# Research Assistant v2.4
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-The eight Python lessons closed at **Research Agent Lite v1.0**. The ten LLM Application Engineering lessons upgraded the same codebase into **Research Assistant v2.0**. The RAG track now keeps evolving that project instead of starting another demo.
+The eight Python lessons closed at **Research Agent Lite v1.0**. The ten LLM Application Engineering lessons upgraded the same codebase into **Research Assistant v2.0**. The RAG track keeps evolving that project instead of starting another demo.
 
-Current project level: **v2.2**.
-
-## What is already inside
-
-Python + LLM layers provide validated boundaries, async execution, retry/fallback, state, structured outputs, streaming state, tool permission, asset provenance, model routing and regression gates.
+Current project level: **v2.4**.
 
 ## RAG increments
 
 - **v2.1** — `BlockType`, `DocumentBlock`, `Document`, `DocumentParser`; parsed content has explicit reading order, block type and `SourceRef` provenance
 - **v2.2** — `ChunkPolicy`, `Chunk`, `StructureAwareChunker`; heading context, atomic tables, overlap, stable ids and policy version are explicit
+- **v2.3** — `EmbeddingProvider`, `EmbeddingService`, `EmbeddingRecord`; model id, dimension and normalization become part of the vector-space contract
+- **v2.4** — `VectorIndex`, `ExactVectorIndex`, `ApproximateGraphIndex`; exact search becomes the correctness baseline and educational ANN exposes the candidate-budget/recall trade-off
 
-The project remains offline-first so architecture and tests stay deterministic. Real parser/embedding/vector-store adapters arrive only after the core interfaces are clear.
+The project remains offline-first so architecture and tests stay deterministic. `DeterministicToyEmbeddingProvider` is deliberately not a semantic embedding model, and `ApproximateGraphIndex` is deliberately not presented as production HNSW.
 
 ## Run
 
@@ -28,41 +26,29 @@ python -m app.main "RAG evaluation"
 pytest -q
 ```
 
-## Structure
+## RAG structure
 
 ```text
 app/
-├── models.py
-├── state.py
-├── errors.py
-├── sources.py
-├── agent.py
-├── context.py
-├── generation.py
-├── streaming.py
-├── structured.py
-├── tools.py
-├── multimodal.py
-├── routing.py
-├── evals.py
-├── documents.py     # v2.1 structured document ingestion model
-├── chunking.py      # v2.2 structure-aware chunk policy
-└── main.py
+├── documents.py       # v2.1 structured document ingestion model
+├── chunking.py        # v2.2 structure-aware chunk policy
+├── embeddings.py      # v2.3 provider-neutral embedding boundary + vector math
+├── vector_index.py    # v2.4 exact baseline + educational graph ANN
+├── multimodal.py      # AssetRef / SourceRef provenance foundation
+├── context.py         # context selection and budgeting
+├── evals.py           # regression gates reused by retrieval evals later
+└── ...
 
 tests/
-├── test_state.py
-├── test_agent.py
-├── test_context_generation.py
-├── test_streaming_structured.py
-├── test_tools_multimodal.py
-├── test_routing_evals.py
-└── test_documents_chunking.py
+├── test_documents_chunking.py
+├── test_embeddings_vector_index.py
+└── ...
 ```
 
-## Why parsing and chunking are separate
+## Why exact search stays in the project
 
-`DocumentParser` converts an asset into a stable document model with structure and provenance. `StructureAwareChunker` consumes that model and decides retrieval units. This keeps parser replacement independent from chunking experiments and makes downstream retrieval evaluation meaningful.
+ANN quality should be measured against a correctness baseline. `ExactVectorIndex` is intentionally simple and slow: it lets later retrieval tests ask whether an approximate index preserved enough of the true top-k set. This is also why `recall_at_k()` is already present before the dedicated retrieval-eval lessons.
 
 ## Next step
 
-RAG 03–04 will add embedding boundaries and a vector-index abstraction, then teach exact search vs ANN/HNSW before any specific vector database becomes the center of the design.
+RAG 05–06 add lexical BM25-style retrieval, dense+sparse hybrid fusion and reranking. Those layers will consume the same `Chunk` ids and return traceable `SearchHit` objects instead of inventing another document representation.
