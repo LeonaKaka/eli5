@@ -68,6 +68,33 @@ def test_evidence_packer_respects_budget_source_cap_and_deduplicates() -> None:
     assert pack.source_count == 2
 
 
+def test_cjk_near_duplicate_evidence_is_suppressed() -> None:
+    packer = EvidencePacker(duplicate_threshold=0.55)
+    pack = packer.pack(
+        [
+            EvidenceCandidate(
+                id="zh1",
+                chunk_id="zh-c1",
+                text="随机场无序增强会降低矫顽场并改变畴壁钉扎行为",
+                source=SourceRef(asset_id="paperA", page=7),
+                relevance_score=0.99,
+                estimated_tokens=80,
+            ),
+            EvidenceCandidate(
+                id="zh2",
+                chunk_id="zh-c2",
+                text="随机场无序增强会降低矫顽场，同时改变畴壁钉扎行为",
+                source=SourceRef(asset_id="paperA", page=7),
+                relevance_score=0.98,
+                estimated_tokens=85,
+            ),
+        ],
+        budget_tokens=300,
+        per_source_cap=3,
+    )
+    assert [item.id for item in pack.items] == ["zh1"]
+
+
 def test_citation_location_is_derived_from_source_ref() -> None:
     pack = EvidencePacker().pack(
         [
