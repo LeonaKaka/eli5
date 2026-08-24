@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from app.agent_control import RunStatus
 from app.production import JobKind, ProductionControlPlane, RunJob
@@ -68,6 +69,58 @@ def test_unnecessary_steps_and_bad_handoff_block_even_without_policy_violation()
         TrajectoryPolicy(maximum_unnecessary_step_rate=0.5, minimum_loop_efficiency=0.6)
     ).evaluate(case)
     assert report.handoff_accuracy == 0.0
+    assert not report.healthy
+
+
+def test_successful_trace_requires_unique_increasing_indexes_and_final_last() -> None:
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        TrajectoryCase(
+            id="bad-order",
+            task_success=False,
+            optimal_action_count=1,
+            steps=[
+                TrajectoryStep(index=2, kind=TrajectoryStepKind.TOOL, action="search"),
+                TrajectoryStep(index=1, kind=TrajectoryStepKind.TOOL, action="fetch"),
+            ],
+        )
+
+    with pytest.raises(ValidationError, match="final event must be the last"):
+        TrajectoryCase(
+            id="early-final",
+            task_success=True,
+            optimal_action_count=1,
+            steps=[
+                TrajectoryStep(index=1, kind=TrajectoryStepKind.FINAL, action="answer"),
+                TrajectoryStep(index=2, kind=TrajectoryStepKind.TOOL, action="late tool"),
+            ],
+        )
+
+    with pytest.raises(ValidationError, match="requires a final event"):
+        TrajectoryCase(
+            id="success-without-final",
+            task_success=True,
+            optimal_action_count=1,
+            steps=[TrajectoryStep(index=1, kind=TrajectoryStepKind.TOOL, action="search")],
+        )
+
+
+def test_critical_violation_on_final_event_still_blocks_health() -> None:
+    case = TrajectoryCase(
+        id="unsafe-final",
+        task_success=True,
+        optimal_action_count=1,
+        steps=[
+            TrajectoryStep(index=1, kind=TrajectoryStepKind.TOOL, action="search"),
+            TrajectoryStep(
+                index=2,
+                kind=TrajectoryStepKind.FINAL,
+                action="answer leaks protected data",
+                critical_violation=True,
+            ),
+        ],
+    )
+    report = TrajectoryEvaluator().evaluate(case)
+    assert report.critical_violation_count == 1
     assert not report.healthy
 
 
