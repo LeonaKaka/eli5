@@ -1,0 +1,52 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent 01 · Agent Loop</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/agent12.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Agent<small>Autonomous Systems Engineering</small></div><div class="nav-label">Agent</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">Agent 01 · Research Assistant v3.1</span><h1>Tool Calling 只是“模型提出一个动作”。<br>Agent 是“执行后再看结果，继续决定下一步”。</h1><p class="lead">前面 LLM 07 已经学过 Tool Calling：模型可以返回 <code class="inline">search_papers(...)</code>。但如果应用执行完就结束，那只是一次工具调用。Agent 的关键变化是：<b>Tool Result 会成为新的 Observation，系统再进入下一轮 Decide。</b></p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先看一个真实问题：检索一次根本不够</h2><div class="sub">用户问“找最相关论文并比较方法”，你事先不知道要调用几次工具。</div></div></div><div class="autonomy-compare"><div class="autonomy-card"><b>一次 Tool Calling</b><pre>user question
+  ↓
+model → search_papers(...)
+  ↓
+execute
+  ↓
+tool result
+  ↓
+结束</pre><p>应用代码提前决定了流程只走一次。</p></div><div class="autonomy-card agent"><b>Agent Loop</b><pre>question
+ ↓
+decide → search
+ ↓
+observation
+ ↓
+decide → fetch paper
+ ↓
+observation
+ ↓
+decide → final answer</pre><p>下一步动作由当前状态和新 observation 决定。</p></div></div><div class="callout"><b>分界点不是“有没有 Tool”。</b>而是执行结果是否会回到决策循环，并影响下一步动作。</div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Interactive：亲手跑一个 Agent Loop</h2><div class="sub">先点一步一步执行，再用自动运行观察完整轨迹。</div></div></div><div class="loop-lab"><div class="loop-controls"><button class="btn active" data-loop-scenario="research">多步科研任务</button><button class="btn" data-loop-scenario="single">简单任务</button><button class="btn primary" id="loopNext">执行下一步</button><button class="btn" id="loopAuto">自动运行</button><button class="btn" id="loopReset">Reset</button></div><div class="agent-cycle"><div class="cycle-node active" data-cycle="observe">Observe</div><span class="arrow">→</span><div class="cycle-node" data-cycle="decide">Decide</div><span class="arrow">→</span><div class="cycle-node" data-cycle="act">Act</div><span class="arrow">→</span><div class="cycle-node" data-cycle="update">Update</div><span class="arrow">→</span><div class="cycle-node" data-cycle="stop">Stop?</div></div><div class="loop-board"><div class="state-panel"><h4>Run State</h4><div class="state-grid"><div class="state-cell"><span>status</span><b id="loopStatus">running</b></div><div class="state-cell"><span>steps</span><b id="loopSteps">0</b></div><div class="state-cell"><span>tool calls</span><b id="loopTools">0</b></div><div class="state-cell"><span>latest decision</span><b id="loopDecision">—</b></div></div><div class="observation"><b>Latest Observation</b><p id="loopObservation">尚无 observation</p></div><div class="observation"><b>Final Answer</b><p id="loopFinal">—</p></div></div><div class="trace-panel"><h4>Trajectory</h4><div class="trace-list" id="loopTrace"></div></div></div></div><div class="callout warn"><b>注意：</b>模型不是在“一次响应里偷偷执行多步”。应用每一步都要显式拿到 decision、验证/执行 action、保存 observation，再调用下一轮 decision。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Agent Loop 最少需要四种东西</h2><div class="sub">少一个，系统就很难调试。</div></div></div><div class="grid2"><div class="card"><b>State</b><p>目标、已有 observation、历史动作、预算、状态。</p></div><div class="card"><b>Decision</b><p>下一步是调用哪个 Tool，还是给最终答案。</p></div><div class="card"><b>Action Executor</b><p>真正执行动作；权限和参数校验仍由应用负责。</p></div><div class="card"><b>Trace</b><p>每一步为什么做、做了什么、得到了什么。</p></div></div><div class="callout">LLM 可以参与 <b>Decision</b>，但它不应该拥有整个控制面。ToolExecutor、权限、budget、stop condition 都应该留在应用侧。</div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Decision 最好是结构化对象，不是一段“思维文本”</h2><div class="sub">你真正需要执行的是动作，而不是依赖模型写一段自然语言计划。</div></div></div><pre>AgentDecision(
+    kind="tool",
+    tool_call=ToolCall(
+        id="call_2",
+        name="fetch_paper",
+        arguments={"paper_id": "paper_17"},
+    ),
+)
+
+# 或
+AgentDecision(
+    kind="final",
+    final_answer="现有证据足够……",
+)</pre><div class="callout"><b>价值：</b>模型输出可以验证；应用知道这是 TOOL 还是 FINAL；测试也能断言“第 2 步应该调用 fetch_paper”，而不是比较一整段自由文本。</div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Observation 是 Tool Result，但不是原样无限堆历史</h2><div class="sub">观察结果也需要结构、裁剪和来源。</div></div></div><pre>Observation(
+    step=2,
+    source="fetch_paper",
+    ok=True,
+    summary="Methods and Results extracted",
+    payload={...},
+)
+</pre><div class="callout warn"><b>大 Tool Output 要谨慎。</b>把 5MB HTML、完整 PDF 或巨型 JSON 每轮重复塞回模型，会迅速把 context、成本和注意力吃光。Agent state 可以保存完整数据，给模型的 observation 只保留决策真正需要的部分。</div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Agent 自主性到底在哪里？</h2><div class="sub">不是“模型能干任何事”。</div></div></div><div class="flow"><div class="node">应用定义<br>Tool Space</div><span class="arrow">→</span><div class="node">模型选择<br>下一动作</div><span class="arrow">→</span><div class="node">应用验证<br>Permission</div><span class="arrow">→</span><div class="node">Executor<br>Act</div></div><p>Agent 的“自主”更准确地说，是：<b>在应用给定的动作空间和约束内，根据当前状态动态选择下一步。</b></p><div class="callout">这比“把 shell、浏览器、数据库管理员权限全给模型”安全得多，也更可测试。</div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>什么时候根本不该用 Agent？</h2><div class="sub">动态循环不是越多越高级。</div></div></div><table class="table"><tr><th>任务</th><th>更合适</th></tr><tr><td>输入固定 → 结构化抽取</td><td>一次模型调用 + Schema</td></tr><tr><td>固定 Search → Summarize</td><td>普通 workflow</td></tr><tr><td>下一步取决于搜索结果，步数不确定</td><td>Agent loop</td></tr><tr><td>高风险审批流程</td><td>显式 workflow + human checkpoint，不能全自动</td></tr></table><div class="callout warn"><b>Agent 带来的是动态决策能力，也带来更大的状态空间。</b>如果流程本来就是固定的，用 Agent 只会增加不可预测性、成本和测试难度。</div></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Trajectory 比最终答案更重要</h2><div class="sub">Agent 的失败常常发生在中间动作。</div></div></div><pre>step 1  decide search_papers      ✅
+step 2  observe 3 papers          ✅
+step 3  decide delete_cache       ❌ unnecessary action
+step 4  decide fetch paper        ✅
+step 5  final answer              ✅
+</pre><div class="callout"><b>最终答案碰巧对，也不代表 trajectory 合格。</b>以后 Agent Eval 会单独测 tool-choice accuracy、unnecessary-step rate、loop efficiency 和危险动作。</div></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v3.1：AgentLoop boundary</h2><div class="sub">复用已有 ToolExecutor，不让 AgentLoop 自己越权执行 handler。</div></div></div><pre>result = await AgentLoop(
+    decision_maker=decision_maker,
+    tool_executor=tool_executor,
+).run(
+    objective="找最相关论文并总结关键结果",
+)
+
+print(result.final_answer)
+print(result.trace)</pre><div class="flow"><div class="node">DecisionMaker</div><span class="arrow">→</span><div class="node">AgentDecision</div><span class="arrow">→</span><div class="node">ToolExecutor</div><span class="arrow">→</span><div class="node">Observation</div><span class="arrow">↺</span></div><div class="callout">下一课会把目前 loop 里的硬编码 max steps 拆成正式的 `LoopGuard / RunBudget / StopReason`。</div></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2><div class="sub">别只回答“Agent 会自己调用工具”。</div></div></div><div class="quiz" data-quiz><h4>模型返回一个 `search()` tool call，应用执行后直接生成固定模板回复并结束。这一定算 Agent 吗？</h4><button class="option" data-feedback="有没有 Tool 不是唯一分界。">A. 一定算，因为使用了 Tool Calling</button><button class="option" data-correct="1">B. 不一定；如果 Tool Result 没回到动态决策循环，更像普通 workflow</button><button class="option" data-feedback="Agent 仍然可以使用结构化 Tool Calling。">C. 不算，因为 Agent 不能用结构化输出</button><div class="feedback"></div></div><div class="callout interview"><b>面试验收：</b>① Tool Calling 和 Agent Loop 区别？② Observe/Decide/Act/Update 各负责什么？③ 为什么 ToolExecutor 应留在应用侧？④ Observation 为什么不能无限原样堆 context？⑤ 哪些任务不该用 Agent？⑥ 为什么要保存 trajectory？⑦ Agent 的“自主性”更准确怎么定义？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="agent01">我能解释并实现一个最小、可追踪的 Agent Loop</label></div></section><div class="footer">下一课：Agent 一旦会循环，第一件要解决的不是 Planning，而是——它会不会永远停不下来？</div></main></div><script src="../assets/app.js"></script><script src="../assets/agent-nav.js"></script><script src="../assets/agent12.js"></script></body></html>
