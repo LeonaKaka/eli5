@@ -1,0 +1,49 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LangGraph 05 · Persistence / Checkpointers</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/langgraph12.css"><link rel="stylesheet" href="../assets/langgraph56.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Graph<small>LangChain / LangGraph</small></div><div class="nav-label">Framework Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">05 · Research Assistant v4.5</span><h1>Checkpoint 不是“存一份聊天记录”。<br>它保存的是某个 thread 在每个 graph super-step 的可恢复状态。</h1><p class="lead">前面 Agent 07 我们手写过 checkpoint / resume。LangGraph 把这类 graph-state persistence 做成了正式 runtime 能力：编译时注入 checkpointer，执行时提供 <b>thread_id</b>，每个 super-step 形成 StateSnapshot。于是你才能 inspect、resume、fault recover、time travel。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先把 Thread、Run、Checkpoint 分开</h2><div class="sub">这三个词非常容易被混成“一个对话”。</div></div></div><div class="persist-compare"><div class="persist-card"><strong>Thread</strong><p>checkpoint 的持久化命名空间。相同 `thread_id` 的多个 run 可以连续积累 graph state。</p></div><div class="persist-card"><strong>Run</strong><p>一次 graph invocation / execution。一个 thread 可以经历多次 run。</p></div><div class="persist-card"><strong>Checkpoint</strong><p>某个 super-step 边界上的 `StateSnapshot`，带 values / next / metadata / checkpoint_id。</p></div></div><div class="callout"><b>thread_id 不是聊天标题。</b>它是 checkpointer 找回这条执行历史的主键/持久 cursor；换 thread_id 就是另一套 checkpoint state。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>最小配置：compile(checkpointer=...) + thread_id</h2><div class="sub">少一个都没有真正的 thread persistence。</div></div></div><pre>from langgraph.checkpoint.memory import InMemorySaver
+
+checkpointer = InMemorySaver()
+graph = builder.compile(checkpointer=checkpointer)
+
+config = {
+  "configurable": {
+    "thread_id": "research-42"
+  }
+}
+
+graph.invoke(initial_state, config=config)</pre><div class="callout warn"><b>InMemorySaver 只是教学/实验。</b>进程重启后内存就没了。生产要换持久 checkpointer；不要因为 API 名里有 Saver 就误以为它天然跨重启 durable。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive：Checkpoint Inspector</h2><div class="sub">切 thread、点 checkpoint，看 StateSnapshot 到底保存了什么。</div></div></div><div class="checkpoint-lab"><div class="thread-tabs"><button class="btn active" data-thread="thread-A">Thread A</button><button class="btn" data-thread="thread-B">Thread B</button><span class="history-note">history 按“最新 checkpoint 在前”展示</span></div><div class="checkpoint-layout"><div class="checkpoint-timeline" id="checkpointList"></div><div class="snapshot-panel"><div class="snapshot-meta"><div><span>thread_id</span><b id="snapshotThread"></b></div><div><span>checkpoint_id</span><b id="snapshotId"></b></div><div><span>metadata.step</span><b id="snapshotStep"></b></div><div><span>next</span><b id="snapshotNext"></b></div></div><pre id="snapshotJson"></pre></div></div></div><div class="callout"><b>最重要的不是 values。</b>`next` 告诉 runtime 下一步该执行谁；`metadata.writes/step` 帮你知道这个 snapshot 是怎么来的；`checkpoint_id` 才让 time travel/replay 有精确落点。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>`get_state()` 和 `get_state_history()` 是调试 Agent 的显微镜</h2><div class="sub">别只盯最终 output。</div></div></div><pre>latest = graph.get_state(config)
+
+history = list(
+    graph.get_state_history(config)
+)
+
+print(latest.values)
+print(latest.next)
+print(latest.metadata)
+print(latest.config)</pre><p>`get_state_history()` 返回这个 thread 的 checkpoint 历史，而且最新 snapshot 在前。你可以定位“哪个 step 后 route 变错”“interrupt 卡在哪个 task”“哪个 node 写坏了 state”。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Checkpoint 是 super-step snapshot，不是每一行 Python 都存一次</h2><div class="sub">理解 super-step，才能理解 fault recovery。</div></div></div><div class="flow"><div class="node">Input</div><span class="arrow">→</span><div class="node">Checkpoint</div><span class="arrow">→</span><div class="node">Node A</div><span class="arrow">→</span><div class="node">Checkpoint</div><span class="arrow">→</span><div class="node">Node B</div><span class="arrow">→</span><div class="node">Checkpoint</div></div><p>如果同一 super-step 有并行节点，LangGraph 还会保存成功 task 的 pending writes；另一条支路失败后恢复时，不必无脑重跑已经成功的兄弟节点。</p><div class="callout">这和我们 Agent 07 手写的 durable boundary 是同一个问题，只是 LangGraph runtime 已经替你处理了更多 graph-level bookkeeping。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>`update_state()` 不是修改旧快照，而是创建新 checkpoint</h2><div class="sub">历史不会被“原地改写”。</div></div></div><pre>before = graph.get_state(config)
+
+graph.update_state(
+    config,
+    {
+      "status": "reviewed",
+      "events": ["manual-review"],
+    },
+)
+
+after = graph.get_state(config)
+
+assert before.config != after.config</pre><div class="callout"><b>Reducer 仍然生效。</b>如果 `events` 是 append reducer，`update_state()` 传入一条新 event 会累积，而不是自动覆盖整列。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Replay / Time Travel：从旧 checkpoint 往后重新执行</h2><div class="sub">“回到过去”不是把未来结果复制回来。</div></div></div><div class="flow"><div class="node">cp-1</div><span class="arrow">→</span><div class="node">cp-2</div><span class="arrow">→</span><div class="node">cp-3</div><span class="arrow">→</span><div class="node">cp-4</div></div><p>选择 `cp-2` replay 时，cp-2 之前的结果可复用；之后的 nodes 会重新执行。因此后面的 LLM call、API call、interrupt 都可能再次发生。</p><div class="callout bad"><b>所以 time travel 不是“免费的撤销键”。</b>凡是 replay 区间里的现实世界副作用，仍然必须 obey idempotency / reconciliation / compensation。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Checkpointer ≠ Store ≠ 我们 v4.0 的 RunStore</h2><div class="sub">这三个持久层解决不同问题。</div></div></div><table class="table"><tr><th>组件</th><th>主要 scope</th><th>存什么</th><th>典型用途</th></tr><tr><td>Checkpointer</td><td>单个 thread</td><td>Graph StateSnapshot</td><td>resume / HITL / time travel / fault recovery</td></tr><tr><td>LangGraph Store</td><td>跨 thread</td><td>应用定义的数据</td><td>用户偏好 / 长期事实 / shared memory</td></tr><tr><td>App RunStore</td><td>产品控制面</td><td>tenant / run status / revision / cancel / owner</td><td>API、Queue、Worker concurrency、authorization</td></tr></table><div class="callout"><b>后面可以整合，但语义别抹平。</b>`thread_id` 不能自动替你完成 tenant authorization；checkpoint 也不会自动替 Queue 做 worker lease。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Durability mode 也是工程选择</h2><div class="sub">保存频率越强，一般一致性越高，成本/延迟也更高。</div></div></div><div class="persist-compare"><div class="persist-card"><strong>exit</strong><p>graph 退出时持久化；性能高，但中途进程 crash 时不能依赖中间 checkpoint 恢复。</p></div><div class="persist-card"><strong>async</strong><p>下一步执行时异步持久化，性能/耐久折中。</p></div><div class="persist-card"><strong>sync</strong><p>下一步开始前同步写 checkpoint，更耐久但有写入开销。</p></div></div><div class="callout">不要机械地“生产就全 sync”。要看任务价值、side-effect 风险、checkpoint 大小、恢复成本和延迟预算。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>Research Assistant v4.5 + 面试验收</h2><div class="sub">项目已经用真实 `InMemorySaver` 和 StateSnapshot API。</div></div></div><pre>graph = build_persistent_graph()
+config = thread_config("research-42")
+
+graph.invoke(initial_state, config=config)
+latest = graph.get_state(config)
+history = list(graph.get_state_history(config))</pre><div class="quiz" data-quiz><h4>同一个用户启动两个互不相关的 Research Run。最危险的做法是什么？</h4><button class="option" data-correct="1">A. 为了“记住用户”，两个独立任务强行复用同一个 thread_id，让 checkpoint state 互相污染</button><button class="option" data-feedback="不同任务使用独立 thread，再通过 Store 读取明确允许的长期记忆更清晰。">B. 独立 thread；需要跨任务的数据放 Store</button><button class="option" data-feedback="这正是 thread isolation 的目的。">C. 每个任务有自己的 checkpoint history</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① thread / run / checkpoint 区别？② StateSnapshot 的 values / next / metadata 分别干嘛？③ 为什么 InMemorySaver 不等于 production durability？④ replay 后哪些节点会重新执行？⑤ update_state 为什么不是原地修改？⑥ checkpointer / Store / RunStore 怎么分工？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="langgraph05">我能用 thread/checkpoint inspect、恢复和调试 Graph，并解释它和产品 RunStore 的边界</label></div></section><div class="footer">下一课：Checkpoint 有了，Graph 才能真正停下来等一个人，然后几小时后从同一 thread 恢复。</div></main></div><script src="../assets/app.js"></script><script src="../assets/langgraph-nav.js"></script><script src="../assets/langgraph56.js"></script></body></html>
