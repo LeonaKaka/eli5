@@ -1,0 +1,47 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 08 · Testing / Dependency Overrides / OpenAPI</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi78.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">08 · Research Assistant v5.8</span><h1>Mock 的目的不是让所有东西变假。<br>而是精准切断“这次测试不想测”的边界。</h1><p class="lead">FastAPI 的 dependency graph 很适合测试替换：`app.dependency_overrides` 可以把真实 IdP、数据库 adapter 或昂贵外部服务换成 deterministic fake。但 Queue/revision/interrupt 这些你真正担心的机制，必须在 integration test 里继续跑真的。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>三层测试，各自回答不同问题</h2></div></div><div class="test-layer-grid"><div class="test-layer" data-test-layer="unit"><b>Endpoint Unit</b><p>HTTP parsing / dependency wiring / status / headers / response model。</p></div><div class="test-layer" data-test-layer="integration"><b>Integration</b><p>RunStore / Queue / revision / Graph / approval 是否真的一起工作。</p></div><div class="test-layer" data-test-layer="contract"><b>OpenAPI Contract</b><p>外部客户端看到的 route/security/header/schema 有没有漂移。</p></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Interactive · Test Boundary Lab</h2><div class="sub">切测试层，观察哪些是真实、哪些被 fake。</div></div></div><div class="test-lab"><div class="test-controls"><select class="select-input" id="testMode"><option value="unit">Endpoint unit</option><option value="integration">Integration</option><option value="contract">OpenAPI contract</option></select><button class="btn" id="overMock">故意 Over-mock</button></div><div class="test-grid"><div class="test-pane"><div class="real-fake"><div class="real-box"><b>真实组件</b><div id="testReal"></div></div><div class="fake-box"><b>替换/跳过</b><div id="testFake"></div></div></div><div class="callout warn" id="testWarning"></div></div><div class="test-pane"><b>测试长什么样</b><pre id="testOut"></pre></div></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>`app.dependency_overrides` 到底替换什么？</h2></div></div><div class="override-arrow"><span class="override-node">HTTPBearer</span><span class="arrow">→</span><span class="override-node replaced">get_current_principal</span><span class="arrow">→</span><span class="override-node">require_permission</span><span class="arrow">→</span><span class="override-node">route</span></div><pre>async def fake_principal():
+    return Principal(
+      subject="test-user",
+      tenant_id="tenant-test",
+      permissions={"runs:read"},
+    )
+
+app.dependency_overrides[
+    get_current_principal
+] = fake_principal</pre><p>FastAPI 会使用 override，不再执行被替换 dependency 的原始子依赖。这样 endpoint-unit test 不需要伪造真实 bearer token 或调用外部 IdP。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>为什么还要 override `get_bridge`？</h2></div></div><pre>class FakeBridge:
+    control.store.get(...)
+      → fixed RunRecord(revision=7)
+
+app.dependency_overrides[get_bridge] = fake_bridge
+
+GET /runs/run-unit
+→ 200
+→ ETag: "7"</pre><p>这条测试只问：“给定一个已授权 Principal 和一个 RunRecord，HTTP endpoint 是否正确投影资源？”它不应该顺便测试 Queue、LangGraph 和 worker。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>但 integration test 不能全 fake</h2></div></div><div class="flow"><div class="node">POST /runs</div><span class="arrow">→</span><div class="node">真实 InMemory RunStore</div><span class="arrow">→</span><div class="node">真实 Queue</div><span class="arrow">→</span><div class="node">真实 Bridge</div></div><p>前面已经有的测试仍然负责：submitted Run 是否保持 QUEUED、重复 job 是否被 revision 拒绝、approval 是否只 enqueue 一次 RESUME、interrupt checkpoint 是否写回产品 Run。</p><div class="callout bad"><b>Over-mock 症状：</b>测试里自己返回 `{"status":"queued"}`，然后 assert 它等于 queued。这只证明 fake 会返回你写进去的值。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Contract test 不等于 snapshot 整份 OpenAPI</h2></div></div><div class="contract-lock"><div class="contract-row head"><div>稳定外部契约</div><div>要锁</div><div>理由</div></div><div class="contract-row"><div>`BearerAuth` scheme</div><div>✅</div><div>客户端认证方式</div></div><div class="contract-row"><div>`If-Match` / `Idempotency-Key`</div><div>✅</div><div>command protocol</div></div><div class="contract-row"><div>`ProblemDetails` schema</div><div>✅</div><div>错误客户端代码</div></div><div class="contract-row"><div>OpenAPI 自动生成字段顺序</div><div>❌</div><div>实现噪音</div></div></div><p>选择性 assert 比整份 JSON snapshot 更耐维护；真正 breaking contract 才应该让测试红。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>测试错误协议时，别只 assert status code</h2></div></div><pre>response = client.post(...invalid body...)
+
+assert response.status_code == 422
+assert response.headers["content-type"] \
+       .startswith("application/problem+json")
+assert body["code"] == "validation_error"
+assert body["request_id"] == \
+       response.headers["x-request-id"]
+assert "secret-input" not in response.text</pre><p>这样同时锁住协议形状和“不泄露原 body / stack trace”的安全属性。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>500 测试为什么要 `raise_server_exceptions=False`？</h2></div></div><pre>client = TestClient(
+    app,
+    raise_server_exceptions=False,
+)
+
+GET /_test/boom
+→ RuntimeError("private-secret")
+→ exception handler
+→ 500 ProblemDetails
+
+assert "private-secret" not in response.text</pre><p>默认 TestClient 会把服务端异常重新 raise 给测试进程，适合调试；要测试最终 500 HTTP response，就需要让异常走完整 ASGI error path。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v5.8 测试矩阵</h2></div></div><table class="table"><tr><th>测试</th><th>层</th><th>主要风险</th></tr><tr><td>`test_fastapi_errors_testing.py` override case</td><td>unit</td><td>dependency / response / ETag</td></tr><tr><td>commands + security</td><td>integration</td><td>idempotency / auth / tenant</td></tr><tr><td>async + SSE</td><td>integration</td><td>worker separation / replay</td></tr><tr><td>OpenAPI assertions</td><td>contract</td><td>security/header/error schema drift</td></tr></table><div class="callout">测试层之间允许有少量重叠，但每个测试应该能回答：“如果它失败，我马上知道是哪一层出了问题吗？”</div></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>什么时候最适合用 `app.dependency_overrides`？</h4><button class="option" data-correct="1">A. 这次只想测试 HTTP endpoint contract，不想调用真实外部 IdP/昂贵 adapter</button><button class="option" data-feedback="如果 revision/Queue 正是你要测的东西，override 掉它们会让测试失去意义。">B. 所有 integration test 都把 RunStore / Queue / Graph 全替换</button><button class="option" data-feedback="override 是测试替换机制，不是生产故障恢复机制。">C. 生产服务异常时临时用 override 修复</button><div class="feedback"></div></div><div class="callout interview"><b>追问：</b>① unit 与 integration 的边界怎么选？② dependency override 为什么比 monkeypatch route 内部变量更清晰？③ 什么叫 over-mocking？④ OpenAPI contract test 应锁哪些字段？⑤ 为什么 500 response test 要关闭 raise_server_exceptions？⑥ 如何确保 override 测试结束后不污染其他测试？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi08">我能用 dependency overrides 精确隔离外部依赖，同时保留必须真实验证的系统边界</label></div></section><div class="footer">下一批：09 Lifespan / Health / Readiness + 10 Production Agent API Architecture，FastAPI 主线正式收口 v6.0。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi78.js"></script></body></html>
