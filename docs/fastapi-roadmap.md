@@ -4,7 +4,7 @@ Scope: expose Research Assistant v5.0 as a real HTTP service without collapsing 
 
 Current reference line: FastAPI 0.141.x, Pydantic v2.
 
-Current progress: **08 / 10 live**, Research Assistant **v5.8**.
+Current progress: **10 / 10 complete**, Research Assistant **v6.0**.
 
 ## 01 — API Boundary / ASGI / First Run API ✅
 Build the first real service around the existing product run lifecycle. Understand ASGI request/response boundaries, `FastAPI()`, path operations, `POST /runs`, `GET /runs/{run_id}`, 201/200/404 semantics and automatic OpenAPI. The HTTP request only submits work; it does not execute a long Agent run inline.
@@ -30,11 +30,11 @@ Install a stable `ProblemDetails` public error contract across request validatio
 ## 08 — Testing / Dependency Overrides / OpenAPI Contract ✅
 Use `TestClient`, `app.dependency_overrides`, fake Principal/control-plane adapters and selective OpenAPI assertions. Separate endpoint-unit tests from integration tests: unit tests may replace auth/external adapters, while revision/Queue/LangGraph behavior remains real in integration tests when those are the mechanisms under test. Contract tests lock Bearer security, command headers, ProblemDetails and important response codes without snapshotting irrelevant generated OpenAPI noise.
 
-## 09 — Lifespan / Health / Readiness / Resource Management
-Manage long-lived DB/HTTP/queue clients with lifespan. Separate liveness/readiness, connection-pool ownership, shutdown and startup failure behavior.
+## 09 — Lifespan / Health / Readiness / Resource Management ✅
+Own long-lived process resources through FastAPI lifespan rather than request handlers or import-time globals. Keep liveness independent from transient external dependency failures, make readiness reflect required service dependencies, allow optional degraded dependencies, and clean up already-started resources if startup fails partway through. Add public minimal `/health/live` and `/health/ready` operational probes.
 
-## 10 — Production Agent API Architecture
-Close Research Assistant at v6.0: API → auth/dependencies → RunStore → Queue/Workers → LangGraph → Stream/HITL. Define deployment and observability boundaries while leaving container/orchestrator concerns for the Docker track.
+## 10 — Production Agent API Architecture ✅
+Close Research Assistant at v6.0: API → auth/dependencies → RunStore → Queue/Workers → LangGraph → Stream/HITL. Add one composition root and a deployment-profile audit that permits deterministic in-memory adapters in teaching mode but rejects them when the caller claims production. Production deployment still requires external durable Run storage, queueing, graph checkpoints, retained events, atomic idempotency storage, real identity validation and durable approval metadata; those infrastructure replacements continue in the Docker/deployment track.
 
 ## Project evolution
 Continue `projects/research-agent-lite/` from Research Assistant v5.0:
@@ -46,8 +46,8 @@ Continue `projects/research-agent-lite/` from Research Assistant v5.0:
 - v5.6 Bearer authentication + Principal permissions + tenant derivation + CORS ✅
 - v5.7 ProblemDetails + exception handlers + request correlation ✅
 - v5.8 dependency overrides + layered HTTP/integration/OpenAPI contract tests ✅
-- v5.9 lifespan/health/readiness
-- v6.0 production Agent API architecture
+- v5.9 lifespan/resource ownership + liveness/readiness ✅
+- v6.0 production Agent API composition + deployment profile gate ✅
 
 ## Teaching rule
-HTTP convenience must not erase system boundaries. A FastAPI endpoint should not directly run long-lived Agent work merely because it can be declared `async`. Authentication is not authorization; CORS is not either. Uniform error JSON must not erase meaningful HTTP status codes, and fast tests must not mock away the concurrency/recovery mechanisms they are supposed to verify.
+HTTP convenience must not erase system boundaries. A FastAPI endpoint should not directly run long-lived Agent work merely because it can be declared `async`. Authentication is not authorization; CORS is not either. Uniform error JSON must not erase meaningful HTTP status codes, fast tests must not mock away the concurrency/recovery mechanisms they are supposed to verify, and a process that can start inside Docker must not be mislabeled production-ready while its authoritative state is still process-local.
