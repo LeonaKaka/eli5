@@ -28,6 +28,20 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 
 Full scope: `docs/llm-app-roadmap.md`.
 
+### RAG Engineering — 2/10 live
+- 01 Document Parsing / Document Model / reading order / OCR / provenance ✅
+- 02 Chunking / overlap / structure-aware boundaries / stable chunk ids ✅
+- 03 Embeddings / Semantic Search
+- 04 Vector DB / ANN / HNSW
+- 05 BM25 / Hybrid Search
+- 06 Reranking
+- 07 Query Rewrite / Multi-query
+- 08 Citation / Provenance
+- 09 Retrieval Eval
+- 10 End-to-End RAG Eval
+
+Full scope: `docs/rag-roadmap.md`.
+
 ## Teaching contract
 Every lesson must include:
 1. A concrete engineering problem first
@@ -39,7 +53,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across both tracks. Python closed at v1.0; the LLM track evolves it into **Research Assistant v2.0**. It remains offline-first so tests are deterministic and no API key is required for the teaching architecture.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, and the RAG track now evolves it from structured document ingestion toward retrieval and citation evaluation.
 
 ```bash
 cd projects/research-agent-lite
@@ -53,20 +67,9 @@ pytest -q
 ## Project evolution
 
 - v1.0 — Python engineering baseline
-- v1.1 — provider boundary / request lifecycle concepts
-- v1.2 — conversation state and message history
-- v1.3 — context builder + token budgeting
-- v1.4 — generation / reasoning profiles
-- v1.5 — explicit streaming state machine and partial-output semantics
-- v1.6 — Pydantic structured-result contracts, validation and refusal shape
-- v1.7 — provider-neutral ToolCall / ToolRegistry / ToolExecutor with schema + permission boundary
-- v1.8 — AssetRef / SourceRef / PreparedAsset pipeline with size policy and provenance
-- v1.9 — ModelRouter with capability gates, weighted priorities and explicit fallbacks
-- v2.0 — EvalCase / EvalReport / RegressionGate with critical-slice regression blocking
-
-## Next track
-
-RAG: document parsing → chunking → embeddings → retrieval → hybrid search → reranking → citations → RAG evaluation.
+- v1.1–v2.0 — LLM application engineering boundaries, routing and evals
+- v2.1 — `Document`, `DocumentBlock`, `BlockType`, `DocumentParser` ingestion boundary
+- v2.2 — `ChunkPolicy`, `Chunk`, `StructureAwareChunker` with heading context, atomic tables, overlap and policy versioning
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
