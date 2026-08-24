@@ -108,6 +108,10 @@ class ProductionControlPlane:
     traces. The in-memory adapters exist to make concurrency/cancellation rules
     deterministic in tests. Lease/heartbeat expiry is assumed to be detected by
     infrastructure; `requeue_abandoned()` models what happens after that fact.
+
+    A claimed run revision acts like an optimistic worker token: every worker-side
+    state transition must present the revision it actually claimed. A stale worker
+    therefore cannot wake up later and overwrite a newer recovery worker.
     """
 
     def __init__(
@@ -201,7 +205,7 @@ class ProductionControlPlane:
         updated = self.store.update(
             run_id,
             tenant_id=tenant_id,
-            expected_revision=current.revision,
+            expected_revision=expected_revision,
             status=RunStatus.PAUSED,
             current_checkpoint_id=checkpoint_id,
         )
@@ -222,6 +226,7 @@ class ProductionControlPlane:
         run_id: str,
         *,
         tenant_id: str,
+        expected_revision: int,
         approval_request_id: str,
         checkpoint_id: str,
     ) -> RunRecord:
@@ -231,7 +236,7 @@ class ProductionControlPlane:
         return self.store.update(
             run_id,
             tenant_id=tenant_id,
-            expected_revision=current.revision,
+            expected_revision=expected_revision,
             status=RunStatus.WAITING_APPROVAL,
             approval_request_id=approval_request_id,
             current_checkpoint_id=checkpoint_id,
@@ -272,6 +277,7 @@ class ProductionControlPlane:
         run_id: str,
         *,
         tenant_id: str,
+        expected_revision: int,
         trace_events: int,
     ) -> RunRecord:
         current = self.store.get(run_id, tenant_id=tenant_id)
@@ -280,7 +286,7 @@ class ProductionControlPlane:
         return self.store.update(
             run_id,
             tenant_id=tenant_id,
-            expected_revision=current.revision,
+            expected_revision=expected_revision,
             status=RunStatus.COMPLETED,
             trace_events=trace_events,
         )
