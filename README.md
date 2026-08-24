@@ -25,18 +25,23 @@ Document parsing → chunking → embeddings → ANN/HNSW → BM25/hybrid → re
 Full scope: `docs/rag-roadmap.md`.
 
 ### Agent Engineering — 10/10 complete
-- 01 Agent Loop / observe → decide → act → update → stop/continue ✅
-- 02 State Machine / Stop Conditions / Run Budgets / LoopGuard ✅
-- 03 Planning / Replanning / dependencies / progress / plan drift ✅
-- 04 Memory Architecture / write policy / scope / contamination / invalidation ✅
-- 05 Multi-step Tool Orchestration / dependency graph / parallel / fan-in / partial failure ✅
-- 06 Human-in-the-loop / Guardrails / exact-call approval / interrupt / least privilege ✅
-- 07 Recovery / Durable Execution / checkpoint / replay safety / reconciliation ✅
-- 08 Multi-Agent / Handoff / Supervisor / ownership / cycle guard ✅
-- 09 Observability / Trajectory Eval / tool choice / efficiency / critical slices ✅
-- 10 Production Agent Architecture / RunStore / Queue / Worker / cancellation / resume ✅
+Agent loop → state/budgets → planning → memory → tool orchestration → approval → durable execution → multi-agent handoff → trajectory eval → production run architecture.
 
 Full scope: `docs/agent-roadmap.md`.
+
+### LangChain / LangGraph — 2/10 live
+- 01 LangChain vs LangGraph / abstraction ladder / `create_agent` vs custom `StateGraph` ✅
+- 02 `StateGraph` core / State / Node / Edge / Reducer / conditional routing / compile ✅
+- 03 LangChain Tools / `ToolNode` / Agent Loop
+- 04 Conditional Flow / `Command` / `Send`
+- 05 Persistence / Threads / Checkpointers
+- 06 Interrupt / Human-in-the-loop / Resume
+- 07 Memory / Store
+- 08 Subgraphs / Multi-Agent / Handoff
+- 09 Middleware / Streaming / Observability
+- 10 Production LangGraph Architecture
+
+Full scope: `docs/langchain-langgraph-roadmap.md`.
 
 ## Teaching contract
 Every lesson must include:
@@ -49,7 +54,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and Agent Engineering closes at **Research Assistant v4.0**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent Engineering at v4.0, and the LangChain / LangGraph track now evolves it toward **Research Assistant v5.0**. Current project level: **v4.2**.
 
 ```bash
 cd projects/research-agent-lite
@@ -59,22 +64,14 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-## Agent project increments
+Current framework dependencies intentionally track the current major lines used by the lessons: `langchain>=1.3,<2` and `langgraph>=1.2,<2`.
 
-- v3.1 — `AgentDecision`, `AgentObservation`, `AgentContext`, `AgentLoop`, `AgentRunResult`, trajectory trace
-- v3.2 — `RunStatus`, `StopReason`, `RunBudget`, `AgentControlState`, `LoopGuard`
-- v3.3 — `Plan`, `PlanStep`, `ProgressSignal`, `ReplanPolicy`, revision-preserving replans
-- v3.4 — `MemoryWritePolicy`, `MemoryStore`, scoped memory, invalidation and bilingual deterministic retrieval baseline
-- v3.5 — `ActionGraph`, `ActionNode`, `ToolOrchestrator`, dependency waves, output bindings and partial-result joins
-- v3.6 — `ApprovalPolicy`, `ApprovalRequest`, `ApprovalManager`; exact ToolCall approval, `WAITING_APPROVAL`, single-use resume and destructive-action policy
-- v3.7 — `DurableAction`, `DurableCheckpoint`, `DurableActionRunner`, `RecoveryDecision`; PREPARED/IN_FLIGHT/COMMITTED are explicit and ambiguous non-idempotent recovery requires reconciliation
-- v3.8 — `AgentDirectory`, `SupervisorRouter`, `HandoffContract`, `HandoffGuard`, `HandoffCoordinator`; capability routing, explicit ownership, typed artifacts and circular delegation protection
-- v3.9 — `TrajectoryCase`, `TrajectoryStep`, `TrajectoryEvaluator`, `TrajectoryPolicy`; task success is separated from process health, efficiency, handoff/recovery correctness and critical violations
-- v4.0 — `RunRecord`, `RunJob`, `InMemoryRunStore`, `InMemoryRunQueue`, `ProductionControlPlane`; tenant-scoped runs, optimistic revisions, stale-job rejection, cancellation and approval resume are explicit
+## Current LangChain / LangGraph increments
 
-The teaching runtime stays provider-neutral and offline-first. In-memory stores/queues/checkpoints validate control-plane contracts; they are not presented as production infrastructure.
+- v4.1 — first real compiled `StateGraph`, mapping manual Agent concepts onto framework execution without a model provider
+- v4.2 — typed graph state, partial node updates, append reducers, fixed edges and conditional routing
 
-Framework-specific orchestration is intentionally deferred until now. The next track is LangChain / LangGraph, mapping these already-understood loop/state/checkpoint/interrupt semantics to a mainstream framework.
+The migration is incremental. Existing Tool, RAG, approval, replay-safety, tenant, authorization and evaluation boundaries remain application concerns unless a later lesson explicitly maps them to a framework abstraction.
 
 ## Pages
-Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
+Deployed with GitHub Actions from the repository root. No backend or secret is required for the static learning UI. The runnable project itself now depends on LangChain/LangGraph for the framework track, but the first graph lessons remain model-free and do not require an API key.
