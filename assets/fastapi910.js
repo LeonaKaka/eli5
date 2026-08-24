@@ -51,19 +51,6 @@
     const render=()=>{
       const prod=select.value==='production';
       audit.innerHTML=processLocal.map(([name,current,target])=>`<div class="audit-item ${prod?'fail':'pass'}"><b>${prod?'❌':'✅'} ${name}</b><br><span>${current}</span><br><small>${prod?'production 需要：'+target:'teaching profile 允许本地 deterministic adapter'}</small></div>`).join('');
-      if(prod){
-        status.textContent='REJECT STARTUP';status.className='http-status bad';
-        deployOut.textContent=['profile = production','audit.accepted = false','','不能因为“Docker 能启动进程”就叫 production：',' - Run/Queue/checkpoint/event/idempotency 仍在单进程内',' - demo token 也不是生产身份验证',' - approval resume metadata 仍会随进程消失','','→ 先替换 external durable adapters，再允许 production profile'];
-      }else{
-        status.textContent='TEACHING ACCEPTED';status.className='http-status ok';
-        deployOut.textContent=['profile = teaching','audit.accepted = true','','可以本机学习：','FastAPI → in-memory RunStore/Queue → Worker → LangGraph','','但这里的“可运行”不等于“可横向扩容/可重启恢复”。'];
-      }
-      deployOut.textContent=deployOut.textContent||deployOut.join?.('\n');
-      if(Array.isArray(deployOut.textContent)) deployOut.textContent=deployOut.textContent.join('\n');
-    };
-    select?.addEventListener('change',()=>{
-      const prod=select.value==='production';
-      audit.innerHTML=processLocal.map(([name,current,target])=>`<div class="audit-item ${prod?'fail':'pass'}"><b>${prod?'❌':'✅'} ${name}</b><br><span>${current}</span><br><small>${prod?'production 需要：'+target:'teaching profile 允许本地 deterministic adapter'}</small></div>`).join('');
       status.textContent=prod?'REJECT STARTUP':'TEACHING ACCEPTED';
       status.className='http-status '+(prod?'bad':'ok');
       deployOut.textContent=(prod?[
@@ -78,7 +65,8 @@
         '可以本机学习：','FastAPI → in-memory RunStore/Queue → Worker → LangGraph','',
         '但这里的“可运行”不等于“可横向扩容/可重启恢复”。'
       ]).join('\n');
-    });
-    select?.dispatchEvent(new Event('change'));
+    };
+    select?.addEventListener('change',render);
+    render();
   }
 })();
