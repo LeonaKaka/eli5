@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .lexical import tokenize
 from .multimodal import SourceRef
 
 
@@ -118,5 +119,11 @@ class EvidencePacker:
 
     @staticmethod
     def _terms(text: str) -> set[str]:
-        normalized = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
-        return {part for part in normalized.split() if part}
+        terms: set[str] = set()
+        for token in tokenize(text):
+            has_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in token)
+            if has_cjk and len(token) > 1:
+                terms.update(token[i : i + 2] for i in range(len(token) - 1))
+            else:
+                terms.add(token)
+        return terms
