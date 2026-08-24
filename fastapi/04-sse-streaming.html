@@ -1,7 +1,8 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 04 · SSE Streaming</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi34.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
 <section class="hero"><span class="kicker">04 · Research Assistant v5.4</span><h1>POST 只负责提交 Run。<br>那“运行中发生了什么”就应该走独立 stream。</h1><p class="lead">对于 Agent 这种主要是服务端向客户端推状态的长任务，SSE 很合适：HTTP 语义简单、浏览器原生支持 EventSource、天然有 `id / event / data`，还能通过 <b>Last-Event-ID</b> 做断线续传。真正难的不是“会 yield”，而是事件 schema、重连、retention、disconnect、backpressure 和安全投影。</p></section>
 <section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>为什么这里先选 SSE，而不是一上来 WebSocket？</h2><div class="sub">需求是单向“服务器持续推 Run 进度”，不是双向实时控制协议。</div></div></div><table class="table"><tr><th></th><th>SSE</th><th>WebSocket</th></tr><tr><td>方向</td><td>Server → Client</td><td>双向</td></tr><tr><td>协议</td><td>普通 HTTP 长连接</td><td>升级为 WebSocket</td></tr><tr><td>事件 id / reconnect</td><td>协议天然支持</td><td>通常自己设计</td></tr><tr><td>适合本项目</td><td>progress / status / approval notification</td><td>以后若需要高频双向协作再考虑</td></tr></table><div class="callout">不是说 WebSocket 不好，而是别为了“实时”就自动选更复杂的协议。</div></section>
-<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>FastAPI 现在有原生 SSE response</h2><div class="sub">不需要自己手拼 `text/event-stream` 字符串。</div></div></div><pre>from fastapi.sse import (
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>FastAPI 现在有原生 SSE response</h2><div class="sub">官方主路径就是 path operation 直接 `yield`，让 SSE 路由层处理序列化和保活。</div></div></div><pre>from collections.abc import AsyncIterator
+from fastapi.sse import (
     EventSourceResponse,
     ServerSentEvent,
 )
@@ -10,18 +11,15 @@
     "/runs/{run_id}/stream",
     response_class=EventSourceResponse,
 )
-async def stream_run(...):
-    async def source():
-        yield ServerSentEvent(
-            id="17",
-            event="progress",
-            data={
-              "phase": "retrieve",
-              "progress": 35,
-            },
-        )
-
-    return EventSourceResponse(source())</pre><div class="callout"><b>FastAPI 的 SSE response 还会处理常见基础细节：</b>空闲连接 keep-alive ping、`Cache-Control: no-cache`、以及避免某些代理缓冲。</div></section>
+async def stream_run(...) -> AsyncIterator[ServerSentEvent]:
+    yield ServerSentEvent(
+        id="17",
+        event="progress",
+        data={
+          "phase": "retrieve",
+          "progress": 35,
+        },
+    )</pre><div class="callout"><b>FastAPI 的 SSE 路由层会处理常见基础细节：</b>空闲连接 keep-alive ping、`Cache-Control: no-cache`、以及避免某些代理缓冲。我们的 400/404/409 preflight 校验则放在 dependency 里，所以会在 stream 真正开始前返回普通 HTTP error。</div></section>
 <section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>一条 SSE 事件在线上长什么样？</h2></div></div><pre>id: 18
 event: progress
 data: {"run_id":"run-42","phase":"rerank","progress":60}
