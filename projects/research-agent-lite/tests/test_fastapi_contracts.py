@@ -4,6 +4,10 @@ from app.fastapi_app import create_app
 from app.langgraph_production import ProductionGraphBridge
 
 
+OWNER_A = {"Authorization": "Bearer demo-owner-a"}
+OWNER_B = {"Authorization": "Bearer demo-owner-b"}
+
+
 def client_with_bridge() -> tuple[TestClient, ProductionGraphBridge]:
     bridge = ProductionGraphBridge()
     return TestClient(create_app(bridge=bridge)), bridge
@@ -14,7 +18,7 @@ def test_v51_post_runs_returns_201_and_only_enqueues_work() -> None:
 
     response = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "  compare   two papers  ", "approval_required": False},
     )
 
@@ -23,6 +27,7 @@ def test_v51_post_runs_returns_201_and_only_enqueues_work() -> None:
     assert body["objective"] == "compare two papers"
     assert body["status"] == "queued"
     assert body["revision"] == 1
+    assert response.headers["etag"] == '"1"'
     assert len(bridge.control.queue) == 1
 
 
@@ -30,20 +35,21 @@ def test_v51_get_run_returns_200_then_missing_run_returns_404() -> None:
     client, _ = client_with_bridge()
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "compare methods"},
     ).json()
 
     found = client.get(
         f"/runs/{created['id']}",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
     )
     assert found.status_code == 200
     assert found.json()["id"] == created["id"]
+    assert found.headers["etag"] == '"1"'
 
     missing = client.get(
         "/runs/run-does-not-exist",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
     )
     assert missing.status_code == 404
 
@@ -53,34 +59,34 @@ def test_v52_request_validation_rejects_blank_objective_and_unknown_fields() -> 
 
     blank = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "   "},
     )
     assert blank.status_code == 422
 
     extra = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "paper search", "admin": True},
     )
     assert extra.status_code == 422
 
 
-def test_v52_tenant_dependency_is_required_and_other_tenant_cannot_enumerate_run() -> None:
+def test_v52_authentication_is_required_and_other_tenant_cannot_enumerate_run() -> None:
     client, _ = client_with_bridge()
 
-    no_tenant = client.post("/runs", json={"objective": "paper search"})
-    assert no_tenant.status_code == 422
+    no_auth = client.post("/runs", json={"objective": "paper search"})
+    assert no_auth.status_code == 401
 
     created = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "private research"},
     ).json()
 
     other_tenant = client.get(
         f"/runs/{created['id']}",
-        headers={"X-Tenant-ID": "tenant-b"},
+        headers=OWNER_B,
     )
     assert other_tenant.status_code == 404
 
@@ -89,7 +95,7 @@ def test_v52_response_model_filters_internal_control_plane_fields() -> None:
     client, _ = client_with_bridge()
     body = client.post(
         "/runs",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=OWNER_A,
         json={"objective": "paper search", "approval_required": True},
     ).json()
 
@@ -106,15 +112,12 @@ def test_v52_response_model_filters_internal_control_plane_fields() -> None:
     assert "budget" not in body
 
 
-def test_v52_openapi_documents_run_contract_and_required_tenant_header() -> None:
+def test_v56_openapi_documents_run_contract_and_bearer_security_scheme() -> None:
     client, _ = client_with_bridge()
     schema = client.get("/openapi.json").json()
 
     assert "/runs" in schema["paths"]
     assert "/runs/{run_id}" in schema["paths"]
     assert schema["paths"]["/runs"]["post"]["responses"]["201"]
-
-    parameters = schema["paths"]["/runs"]["post"]["parameters"]
-    tenant_header = next(item for item in parameters if item["name"] == "X-Tenant-ID")
-    assert tenant_header["in"] == "header"
-    assert tenant_header["required"] is True
+    assert "BearerAuth" in schema["components"]["securitySchemes"]
+    assert schema["components"]["securitySchemes"]["BearerAuth"]["scheme"] == "bearer"
