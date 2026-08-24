@@ -1,0 +1,52 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 07 · Error Model</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi78.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">07 · Research Assistant v5.7</span><h1>状态码告诉客户端“哪一类失败”。<br>稳定错误 body 告诉它“接下来该怎么办”。</h1><p class="lead">前面我们已经有 401 / 403 / 404 / 409 / 412 / 422 / 428，但 body 仍来自不同地方的 `HTTPException(detail=...)`。v5.7 把它们统一成一个 <b>ProblemDetails</b> 外壳，同时保留不同状态语义，并为每次失败生成 server-side `request_id`。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>“统一错误”不是把所有失败都变成 400</h2><div class="sub">状态码仍然是协议的一部分。</div></div></div><div class="handler-stack"><div class="handler-row"><b>Authentication</b><span>token 缺失/无效</span><span class="status">401</span></div><div class="handler-row"><b>Authorization</b><span>已认证但没 permission</span><span class="status">403</span></div><div class="handler-row"><b>Resource scope</b><span>tenant 内看不到目标 Run</span><span class="status">404</span></div><div class="handler-row"><b>Command conflict</b><span>同 key 改语义 / 状态不允许</span><span class="status">409</span></div><div class="handler-row"><b>Stale state</b><span>If-Match revision 已过期</span><span class="status">412</span></div><div class="handler-row"><b>Validation</b><span>request schema 不合法</span><span class="status">422</span></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>v5.7 的公开 Error Contract</h2></div></div><pre>{
+  "type": "urn:research-assistant:problem:precondition_failed",
+  "title": "Precondition failed",
+  "status": 412,
+  "detail": "Run revision changed: ...",
+  "instance": "/runs/run-42/cancel",
+  "code": "precondition_failed",
+  "request_id": "req-7a2f..."
+}</pre><div class="problem-shape"><div class="problem-field"><strong>status</strong>HTTP-level category</div><div class="problem-field"><strong>code</strong>客户端稳定分支 key</div><div class="problem-field"><strong>request_id</strong>去私有日志找细节</div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive · Error Pipeline Lab</h2><div class="sub">切换失败来源，看内部异常如何变成同一种公共外壳。</div></div></div><div class="problem-lab"><div class="problem-controls"><select class="select-input" id="problemScenario"><option value="validation">422 validation</option><option value="auth">401 authentication</option><option value="forbidden">403 permission</option><option value="missing">404 not found</option><option value="conflict">409 idempotency conflict</option><option value="stale">412 stale revision</option><option value="unavailable">503 dependency unavailable</option><option value="crash">500 unexpected crash</option></select><span class="error-chip" data-problem-chip="validation">validation</span><span class="error-chip" data-problem-chip="stale">stale</span><span class="error-chip" data-problem-chip="crash">500</span></div><div class="problem-grid"><div class="problem-pane"><b>内部来源</b><p id="problemSource"></p><div class="request-id-line"><b>HTTP</b><span id="problemStatus"></span><b>code</b><span id="problemCode"></span><b>request</b><span id="problemRequest"></span></div><div id="problemSafety" class="problem-field"></div></div><div class="problem-pane"><b>公开 `application/problem+json`</b><pre id="problemOut"></pre></div></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>为什么要接管 RequestValidationError？</h2></div></div><p>FastAPI 会把请求校验失败包装成 `RequestValidationError`。v5.7 只投影 `location / message / type`，不把原始 request body、内部 Python 异常或调试上下文直接回给客户端。</p><pre>errors = [
+  {
+    "location": "body.objective",
+    "message": "Value error, ...",
+    "type": "value_error"
+  }
+]</pre><div class="callout warn"><b>日志 ≠ response。</b>调试时你可以在私有 telemetry 里关联更多信息；公开 API 不需要知道源码文件名、堆栈或整份原始 body。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>为什么还要接管 Starlette HTTPException？</h2></div></div><pre>@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc):
+    return problem_response(
+      status=exc.status_code,
+      detail=public_detail,
+      headers=exc.headers,
+    )</pre><p>这样认证 dependency 抛出的 401、permission 403、Run lookup 404、command 409/412/428 都能得到相同 public shape。同时要保留 `WWW-Authenticate: Bearer` 这类有协议意义的 header。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>500 必须比 4xx 更保守</h2></div></div><div class="leak-box"><b>❌ 不要</b><pre>{"detail":"KeyError at /srv/app/... checkpoint=cp-secret ..."}</pre></div><div class="safe-box"><b>✅ 公共响应</b><pre>{
+  "code":"internal_error",
+  "detail":"An unexpected server error occurred.",
+  "request_id":"req-..."
+}</pre></div><p>真实 exception 进入私有日志/trace，并用 `request_id` 关联。客户端只需要知道这是服务端故障和它的 correlation id。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Request ID 是错误协议和 observability 的桥</h2></div></div><div class="flow"><div class="node">HTTP request</div><span class="arrow">→</span><div class="node">server generates req-123</div><span class="arrow">→</span><div class="node">Problem body + header</div><span class="arrow">→</span><div class="node">private logs / trace</div></div><div class="callout">request_id 不是用户身份、tenant id 或安全 token。它只是 correlation handle，方便支持/工程人员定位同一次请求。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>OpenAPI 也应该知道失败长什么样</h2></div></div><pre>@app.post(
+  "/runs/{run_id}/cancel",
+  response_model=RunResponse,
+  responses=problem_responses(
+    400, 401, 403, 404,
+    409, 412, 422, 428, 500,
+  ),
+)</pre><p>Exception handler 解决“运行时返回什么”，`responses=` 解决“客户端生成器和 `/docs` 知道什么”。两边缺一边，contract 都不完整。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v5.7</h2></div></div><pre>app/fastapi_errors.py
+├── ProblemDetails
+├── ValidationIssue
+├── request-id middleware
+├── RequestValidationError handler
+├── HTTPException handler
+└── generic 500 handler
+
+fastapi_app.py
+└── every route documents ProblemDetails responses</pre><p>旧的状态码语义没有被抹掉，只是统一了 client-facing body 与 correlation。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>为什么 500 response 不应该直接返回 `str(exc)`？</h4><button class="option" data-feedback="方便调试不等于适合公开；异常字符串可能带路径、secret、query 或内部状态。">A. 应该返回，前端调试更方便</button><button class="option" data-correct="1">B. 公开返回 generic detail + request_id，内部日志保存真实 exception 并用 request_id 关联</button><button class="option" data-feedback="把所有 500 改成 400 会破坏错误语义和监控。">C. 把所有异常都改成 400 就不会泄露</button><div class="feedback"></div></div><div class="callout interview"><b>追问：</b>① 409 和 412 差别？② 为什么 validation handler 不回显整个 body？③ HTTPException handler 为什么要保留 headers？④ request_id 能否当 auth token？⑤ runtime handler 和 OpenAPI `responses=` 分别解决什么？⑥ 503 与 500 怎么区分？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi07">我能设计稳定错误 contract，并把公开错误、私有日志和 HTTP 状态语义分开</label></div></section><div class="footer">下一课：不要只测试 happy path。用 dependency overrides 精确切断外部依赖，同时保留真正要验证的系统边界。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi78.js"></script></body></html>
