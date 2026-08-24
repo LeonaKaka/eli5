@@ -24,13 +24,13 @@ Document parsing → chunking → embeddings → ANN/HNSW → BM25/hybrid → re
 
 Full scope: `docs/rag-roadmap.md`.
 
-### Agent Engineering — 4/10 live
+### Agent Engineering — 6/10 live
 - 01 Agent Loop / observe → decide → act → update → stop/continue ✅
 - 02 State Machine / Stop Conditions / Run Budgets / LoopGuard ✅
 - 03 Planning / Replanning / dependencies / progress / plan drift ✅
 - 04 Memory Architecture / write policy / scope / contamination / invalidation ✅
-- 05 Multi-step Tool Orchestration
-- 06 Human-in-the-loop / Guardrails / Approval
+- 05 Multi-step Tool Orchestration / dependency graph / parallel / fan-in / partial failure ✅
+- 06 Human-in-the-loop / Guardrails / exact-call approval / interrupt / least privilege ✅
 - 07 Recovery / Durable Execution
 - 08 Multi-Agent / Handoff / Supervisor
 - 09 Observability / Trajectory Eval
@@ -49,7 +49,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and the Agent track is now at **Research Assistant v3.4**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and the Agent track is now at **Research Assistant v3.6**.
 
 ```bash
 cd projects/research-agent-lite
@@ -65,8 +65,10 @@ pytest -q
 - v3.2 — `RunStatus`, `StopReason`, `RunBudget`, `AgentControlState`, `LoopGuard`
 - v3.3 — `Plan`, `PlanStep`, `ProgressSignal`, `ReplanPolicy`, revision-preserving replans
 - v3.4 — `MemoryWritePolicy`, `MemoryStore`, scoped memory, invalidation and bilingual deterministic retrieval baseline
+- v3.5 — `ActionGraph`, `ActionNode`, `ToolOrchestrator`, dependency waves, output bindings and partial-result joins
+- v3.6 — `ApprovalPolicy`, `ApprovalRequest`, `ApprovalManager`; exact ToolCall approval, `WAITING_APPROVAL`, single-use resume and destructive-action policy
 
-The first Agent lessons deliberately reuse the existing `ToolExecutor` permission boundary. A model may propose the next action, but execution, budgets, hard stop conditions, replan triggers and long-term memory writes remain application-side controls.
+The Agent track deliberately keeps planning, execution, memory, approval and tool permission boundaries separate. A model may propose actions, but dependency execution, concurrency, side-effect policy, approval state and hard stops remain application-side controls.
 
 Framework-specific orchestration is intentionally deferred. LangGraph comes in the next capability track after the underlying loop/state/checkpoint problems are understood.
 
