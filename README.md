@@ -14,13 +14,13 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 - 07 class, dataclass, mutable defaults, composition, AgentState · v0.7
 - 08 pytest, mock/fake, test layers, runnable Research Agent Lite · v1.0
 
-### LLM Application Engineering — 4/10 live
+### LLM Application Engineering — 6/10 live
 - 01 Model API / Request Lifecycle ✅
 - 02 Messages / Instructions / Conversation State ✅
 - 03 Tokens / Context Window / Context Engineering / Caching ✅
 - 04 Generation & Reasoning Controls ✅
-- 05 Streaming
-- 06 Structured Outputs
+- 05 Streaming / TTFT / cancellation / partial output ✅
+- 06 Structured Outputs / JSON Schema / Pydantic / refusal ✅
 - 07 Tool / Function Calling
 - 08 Multimodal / Files
 - 09 Model Selection / Cost / Latency / Reliability
@@ -37,9 +37,9 @@ Every lesson must include:
 5. A continuous project increment
 6. Exercises + interview-level checks
 
-## Runnable Python project
+## Runnable project
 
-`projects/research-agent-lite/` is the Python course-closing project. It runs without an API key and includes Pydantic models, async source adapters, bounded retry, partial results, dataclass state, composition, pytest tests, and CI.
+`projects/research-agent-lite/` is the same project across both tracks. Python closed at v1.0; the LLM lessons keep evolving it toward Research Assistant v2.0. It remains offline-first so tests are deterministic and no API key is required yet.
 
 ```bash
 cd projects/research-agent-lite
@@ -50,19 +50,17 @@ python -m app.main "RAG evaluation" --top-k 3
 pytest -q
 ```
 
-Local verification during development: `4 passed`, and the CLI exercised one transient retry successfully.
-
 ## Project evolution
 
-Python closes at `Research Agent Lite v1.0`. The LLM track upgrades that same project into `Research Assistant v2.0`.
-
-Current LLM increments:
-- v1.1 — provider-abstracted model client / request lifecycle
+- v1.0 — Python engineering baseline
+- v1.1 — provider boundary / request lifecycle concepts
 - v1.2 — conversation state and message history
-- v1.3 — context builder, token budget, caching-aware layout
-- v1.4 — task-specific generation / reasoning profiles
+- v1.3 — context builder + token budgeting
+- v1.4 — generation / reasoning profiles
+- v1.5 — explicit streaming state machine and partial-output semantics
+- v1.6 — Pydantic structured-result contracts, validation and refusal shape
 
-Planned next: streaming, structured outputs, one controlled tool call, model routing, usage accounting, and an eval suite.
+Planned next: one controlled tool call, multimodal/file boundaries, model routing, usage accounting, and an eval suite.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
