@@ -60,6 +60,12 @@ class TenantContext:
     tenant_id: str
 
 
+@dataclass(frozen=True)
+class RunStreamContext:
+    tenant_id: str
+    cursor: int
+
+
 async def get_tenant_context(
     x_tenant_id: Annotated[str, Header(alias="X-Tenant-ID", min_length=1, max_length=128)],
 ) -> TenantContext:
@@ -132,6 +138,36 @@ def _parse_last_event_id(raw: str | None) -> int:
             detail="Last-Event-ID must be a non-negative integer",
         )
     return value
+
+
+async def get_run_stream_context(
+    run_id: str,
+    tenant: TenantDep,
+    runtime: BridgeDep,
+    events: RunEventsDep,
+    last_event_id: Annotated[
+        str | None,
+        Header(alias="Last-Event-ID", description="Resume after this SSE event id"),
+    ] = None,
+) -> RunStreamContext:
+    """Validate stream ownership/cursor before the SSE response starts."""
+
+    _load_public_run(
+        runtime,
+        run_id=run_id,
+        tenant_id=tenant.tenant_id,
+    )
+    cursor = _parse_last_event_id(last_event_id)
+    oldest = events.oldest_sequence(tenant_id=tenant.tenant_id, run_id=run_id)
+    if last_event_id is not None and oldest is not None and cursor < oldest - 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="requested event history is no longer retained; refetch Run state",
+        )
+    return RunStreamContext(tenant_id=tenant.tenant_id, cursor=cursor)
+
+
+RunStreamDep = Annotated[RunStreamContext, Depends(get_run_stream_context)]
 
 
 def create_app(
@@ -207,62 +243,41 @@ def create_app(
     async def stream_run(
         run_id: str,
         request: Request,
-        tenant: TenantDep,
+        stream: RunStreamDep,
         runtime: BridgeDep,
         events: RunEventsDep,
-        last_event_id: Annotated[
-            str | None,
-            Header(alias="Last-Event-ID", description="Resume after this SSE event id"),
-        ] = None,
         follow: Annotated[
             bool,
             Query(description="Keep following future events; false is useful for replay/tests"),
         ] = True,
-    ) -> EventSourceResponse:
-        record = _load_public_run(
-            runtime,
-            run_id=run_id,
-            tenant_id=tenant.tenant_id,
-        )
-        cursor = _parse_last_event_id(last_event_id)
-
-        oldest = events.oldest_sequence(tenant_id=tenant.tenant_id, run_id=run_id)
-        if last_event_id is not None and oldest is not None and cursor < oldest - 1:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="requested event history is no longer retained; refetch Run state",
+    ) -> AsyncIterator[ServerSentEvent]:
+        cursor = stream.cursor
+        while True:
+            batch = events.list_after(
+                tenant_id=stream.tenant_id,
+                run_id=run_id,
+                after_sequence=cursor,
             )
-
-        async def event_source() -> AsyncIterator[ServerSentEvent]:
-            nonlocal cursor, record
-            while True:
-                batch = events.list_after(
-                    tenant_id=tenant.tenant_id,
-                    run_id=run_id,
-                    after_sequence=cursor,
+            for item in batch:
+                cursor = item.sequence
+                yield ServerSentEvent(
+                    id=str(item.sequence),
+                    event=item.event.value,
+                    data=item.public_data(),
                 )
-                for item in batch:
-                    cursor = item.sequence
-                    yield ServerSentEvent(
-                        id=str(item.sequence),
-                        event=item.event.value,
-                        data=item.public_data(),
-                    )
 
-                if not follow:
-                    return
+            if not follow:
+                return
 
-                record = runtime.control.store.get(
-                    run_id,
-                    tenant_id=tenant.tenant_id,
-                )
-                if record.status in _TERMINAL_STATUSES:
-                    return
-                if await request.is_disconnected():
-                    return
-                await anyio.sleep(0.25)
-
-        return EventSourceResponse(event_source())
+            record = runtime.control.store.get(
+                run_id,
+                tenant_id=stream.tenant_id,
+            )
+            if record.status in _TERMINAL_STATUSES:
+                return
+            if await request.is_disconnected():
+                return
+            await anyio.sleep(0.25)
 
     return app
 
