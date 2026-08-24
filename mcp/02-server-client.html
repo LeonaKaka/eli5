@@ -1,0 +1,49 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MCP 02 · Server + Client</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/mcp12.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 MCP<small>Tool Ecosystem</small></div><div class="nav-label">Advanced Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">02 · Research Assistant v6.2</span><h1>现在真的建一个 MCP Server。<br>Client 通过协议发现它，而不是 import 函数表。</h1><p class="lead">这一课直接使用当前 Python SDK v2：`MCPServer` 暴露 capability，`Client(mcp)` 走官方 in-process MCP path。你会实际看到 `tools/list → tools/call → resources/read → prompts/get` 的不同职责。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>现在的 Python SDK 高层 API 很小</h2></div></div><pre>from mcp.server import MCPServer
+from mcp import Client
+
+mcp = MCPServer("Research Assistant Capabilities")
+
+@mcp.tool()
+def search_papers(query: str, limit: int = 3):
+    ...
+
+@mcp.resource("research://catalog")
+def catalog():
+    ...
+
+@mcp.prompt()
+def compare_papers(left_id: str, right_id: str):
+    ...</pre><p>函数名/Docstring/type hints 会生成能力名、description、tool input schema。你不需要自己手写 `tools/list` JSON-RPC handler。</p></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Research MCP Server 的真实 inventory</h2></div></div><div class="server-inspector"><div class="inventory"><button class="inventory-item active" data-inspect="discover">① Discover capabilities</button><button class="inventory-item" data-inspect="tools">② List tools</button><button class="inventory-item" data-inspect="call">③ Call tool</button><button class="inventory-item" data-inspect="resource">④ Read concrete resource</button><button class="inventory-item" data-inspect="template">⑤ Inspect resource template</button><button class="inventory-item" data-inspect="prompt">⑥ Get prompt</button></div><div class="mcp-result"><b id="inspectTitle"></b><pre id="inspectBody"></pre></div></div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>`@mcp.tool()`：schema 是协议 contract，不是 Python 函数注释</h2></div></div><pre>@mcp.tool()
+def search_papers(
+    query: str,
+    limit: int = 3,
+) -> list[dict[str, str]]:
+    """Search the teaching paper catalog by title, topic or summary."""
+    ...</pre><p>Client 调 `tools/list` 后得到的不只是名字，还拿到模型可见的 description 和 JSON Schema。`query: str`、`limit: int` 会真正限制“模型应该构造什么 arguments”。</p><div class="callout warn"><b>但 schema 只解决输入形状。</b>它不替你解决 tenant 权限、side-effect approval、quota、idempotency。</div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Resource 和 Tool 在 wire 上就是不同 verb</h2></div></div><div class="protocol-lane"><div class="protocol-step"><b>Tool discovery</b><span>`tools/list` → search_papers + inputSchema</span></div><div class="protocol-step"><b>Tool execution</b><span>`tools/call` → name + arguments → result</span></div><div class="protocol-step"><b>Resource discovery</b><span>`resources/list` / `resources/templates/list`</span></div><div class="protocol-step"><b>Resource read</b><span>`resources/read` → `research://catalog`</span></div><div class="protocol-step"><b>Prompt discovery</b><span>`prompts/list`</span></div><div class="protocol-step"><b>Prompt render</b><span>`prompts/get` → rendered user message(s)</span></div></div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Resource Template：一个函数服务很多地址</h2></div></div><pre>@mcp.resource(
+  "research://paper/{paper_id}",
+  mime_type="application/json",
+)
+def research_paper(paper_id: str):
+    ...</pre><div class="flow"><div class="node">research://paper/rfim-domain-wall</div><span class="arrow">→</span><div class="node">paper_id=rfim-domain-wall</div><span class="arrow">→</span><div class="node">JSON context</div></div><p>这跟 `search_papers(query)` 的意义完全不同：Template 已经有一个可寻址 URI pattern；Host 知道具体 id 后可以精确读取。</p></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Prompt 返回的是 messages，不是“服务器替模型回答”</h2></div></div><pre>@mcp.prompt()
+def compare_papers(left_id: str, right_id: str) -> str:
+    return (
+      "Compare ... "
+      f"Read research://paper/{left_id} ..."
+    )</pre><p>`prompts/get` 最终得到 prompt messages。Host 可以把这些 messages 送给自己的模型；MCP Server 本身并没有因此变成 Agent/LLM。</p></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Interactive · Client connection topology</h2></div></div><div class="mcp-controls"><select id="hostMode" class="select-input"><option value="local">in-process · tests</option><option value="stdio">stdio · local subprocess</option><option value="http">Streamable HTTP · remote</option></select></div><div class="mcp-result"><pre id="hostFlowOut"></pre></div><p>这三种 transport 改变的是 Client ↔ Server 怎么连，不应该改变 `search_papers` 的业务语义。第 03 课会专门展开。</p></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>为什么测试优先 `Client(mcp)`？</h2></div></div><pre>async with Client(mcp) as client:
+    tools = await client.list_tools()
+    result = await client.call_tool(
+        "search_papers",
+        {"query": "domain wall"},
+    )</pre><p>它不像 `search_papers("domain wall")` 那样绕过协议层；Client 仍然经历 MCP capability surface、tool call result、resource/prompt result 类型，只是省掉 subprocess/network 的不稳定因素。这正适合 unit/integration boundary。</p></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>当前 SDK v2 和旧教程有什么差别？</h2></div></div><div class="boundary-strip"><div class="boundary-card good"><b>当前</b><p>`MCPServer` + first-class `Client`</p></div><div class="boundary-card good"><b>当前</b><p>`Client(server)` / URL / transport 自动处理连接模式</p></div><div class="boundary-card bad"><b>旧教程常见</b><p>`FastMCP` 旧类名</p></div><div class="boundary-card bad"><b>旧教程常见</b><p>手动套 transport → ClientSession → initialize 作为唯一高层用法</p></div></div><p>底层 `ClientSession` 仍存在，但 v2 已经提供 first-class `Client`；新课程先用高层正确抽象，需要底层控制时再下钻。</p></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>v6.2 回归测试锁什么？</h2></div></div><pre>Client(mcp)
+  ↓
+capabilities include tools/resources/prompts
+  ↓
+list_tools() → search_papers + inputSchema
+  ↓
+call_tool() → real MCP tool result
+  ↓
+read_resource(research://catalog)
+  ↓
+read_resource(research://paper/...)
+  ↓
+get_prompt(compare_papers)</pre><div class="quiz" data-quiz><h4>为什么测试里不直接调用 `search_papers()`？</h4><button class="option" data-feedback="这样只能证明 Python 函数工作。">A. 因为异步代码不能调用普通函数</button><button class="option" data-correct="1">B. 因为我们要验证 MCP 暴露/发现/调用 contract，而不只是函数本体</button><button class="option" data-feedback="in-process Client 不需要真实网络。">C. MCP 必须开 HTTP 端口才能测试</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① decorator 如何生成 tool schema？② concrete Resource 与 template 区别？③ Prompt server 是否需要 LLM？④ `Client(mcp)` 测到了什么、没测到什么？⑤ 为什么 transport 不该改变 primitive 业务语义？⑥ SDK v2 为什么减少了手动 session boilerplate？⑦ tool schema 验证能否替代 authorization？⑧ MCP client 应不应该把所有 server tools 无条件发给模型？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="mcp02">我能用 MCPServer + Client 真正发现并调用 Tool / Resource / Prompt</label></div></section><div class="footer">下一批：03 stdio / Streamable HTTP / stateless MCP + 04 Tool Contracts / Errors / Progress。</div></main></div><script src="../assets/app.js"></script><script src="../assets/mcp-nav.js"></script><script src="../assets/mcp12.js"></script></body></html>
