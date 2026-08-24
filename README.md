@@ -28,4 +28,4 @@ Every lesson must include:
 08. Testing + Research Agent Lite v1.0
 
 ## Pages
-Designed to deploy directly from the repository root with GitHub Pages. No build step, backend, or API key is required for the learning UI.
+Deployed with GitHub Actions from the repository root. No build step, backend, or API key is required for the learning UI.
