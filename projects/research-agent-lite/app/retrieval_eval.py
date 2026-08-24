@@ -17,6 +17,11 @@ class RetrievalEvalCase(BaseModel):
     def validate_relevance(cls, value: dict[str, int]) -> dict[str, int]:
         if any(score < 0 or score > 3 for score in value.values()):
             raise ValueError("relevance scores must be between 0 and 3")
+        if not any(score > 0 for score in value.values()):
+            raise ValueError(
+                "ranking metrics require at least one positive relevance judgment; "
+                "evaluate no-answer queries with separate abstention/false-positive metrics"
+            )
         return value
 
 
@@ -103,7 +108,7 @@ class RetrievalEvaluator:
         top_k = run.ranked_ids[: self.k]
         relevant_in_top_k = sum(1 for doc_id in top_k if doc_id in positive)
         precision = relevant_in_top_k / self.k
-        recall = relevant_in_top_k / len(positive) if positive else 1.0
+        recall = relevant_in_top_k / len(positive)
         hit_rate = 1.0 if relevant_in_top_k else 0.0
 
         first_relevant_rank = next(
@@ -139,7 +144,9 @@ def ndcg_at_k(ranked_ids: list[str], relevance: dict[str, int], k: int) -> float
     ideal_ids = [f"ideal:{i}" for i in range(len(ideal_scores))]
     ideal_relevance = {doc_id: score for doc_id, score in zip(ideal_ids, ideal_scores)}
     ideal = dcg_at_k(ideal_ids, ideal_relevance, k)
-    return actual / ideal if ideal > 0 else 1.0
+    if ideal <= 0:
+        raise ValueError("nDCG requires at least one positive relevance judgment")
+    return actual / ideal
 
 
 def _summarize(items: list[RetrievalCaseMetrics]) -> RetrievalMetricSummary:
