@@ -31,7 +31,7 @@ def base_plan() -> Plan:
     )
 
 
-def test_plan_validates_dependencies_and_exposes_ready_steps() -> None:
+def test_plan_validates_dependencies_cycles_and_exposes_ready_steps() -> None:
     plan = base_plan()
     assert plan.ready_step_ids() == ["search"]
     assert plan.completed_fraction() == 0.25
@@ -40,6 +40,15 @@ def test_plan_validates_dependencies_and_exposes_ready_steps() -> None:
         Plan(
             objective="broken",
             steps=[PlanStep(id="x", description="bad", dependencies=["missing"])],
+        )
+
+    with pytest.raises(ValidationError):
+        Plan(
+            objective="cycle",
+            steps=[
+                PlanStep(id="a", description="A", dependencies=["b"]),
+                PlanStep(id="b", description="B", dependencies=["a"]),
+            ],
         )
 
 
@@ -148,3 +157,10 @@ def test_memory_store_searches_bilingual_content_and_excludes_invalidated_record
     store.invalidate("zh", reason="superseded by corrected evidence")
     assert store.get("zh") is not None and not store.get("zh").active
     assert store.search("滑移铁电") == []
+
+
+def test_memory_store_refuses_to_overwrite_an_existing_id() -> None:
+    store = MemoryStore()
+    store.write(request(id="stable-id"))
+    with pytest.raises(ValueError, match="already exists"):
+        store.write(request(id="stable-id", content="silently replacing history would be bad"))
