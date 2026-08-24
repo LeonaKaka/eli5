@@ -24,7 +24,7 @@ Document parsing → chunking → embeddings → ANN/HNSW → BM25/hybrid → re
 
 Full scope: `docs/rag-roadmap.md`.
 
-### Agent Engineering — 8/10 live
+### Agent Engineering — 10/10 complete
 - 01 Agent Loop / observe → decide → act → update → stop/continue ✅
 - 02 State Machine / Stop Conditions / Run Budgets / LoopGuard ✅
 - 03 Planning / Replanning / dependencies / progress / plan drift ✅
@@ -33,8 +33,8 @@ Full scope: `docs/rag-roadmap.md`.
 - 06 Human-in-the-loop / Guardrails / exact-call approval / interrupt / least privilege ✅
 - 07 Recovery / Durable Execution / checkpoint / replay safety / reconciliation ✅
 - 08 Multi-Agent / Handoff / Supervisor / ownership / cycle guard ✅
-- 09 Observability / Trajectory Eval
-- 10 Production Agent Architecture
+- 09 Observability / Trajectory Eval / tool choice / efficiency / critical slices ✅
+- 10 Production Agent Architecture / RunStore / Queue / Worker / cancellation / resume ✅
 
 Full scope: `docs/agent-roadmap.md`.
 
@@ -49,7 +49,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and the Agent track is now at **Research Assistant v3.8**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and Agent Engineering closes at **Research Assistant v4.0**.
 
 ```bash
 cd projects/research-agent-lite
@@ -59,7 +59,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-## Current Agent project increments
+## Agent project increments
 
 - v3.1 — `AgentDecision`, `AgentObservation`, `AgentContext`, `AgentLoop`, `AgentRunResult`, trajectory trace
 - v3.2 — `RunStatus`, `StopReason`, `RunBudget`, `AgentControlState`, `LoopGuard`
@@ -69,12 +69,12 @@ pytest -q
 - v3.6 — `ApprovalPolicy`, `ApprovalRequest`, `ApprovalManager`; exact ToolCall approval, `WAITING_APPROVAL`, single-use resume and destructive-action policy
 - v3.7 — `DurableAction`, `DurableCheckpoint`, `DurableActionRunner`, `RecoveryDecision`; PREPARED/IN_FLIGHT/COMMITTED are explicit and ambiguous non-idempotent recovery requires reconciliation
 - v3.8 — `AgentDirectory`, `SupervisorRouter`, `HandoffContract`, `HandoffGuard`, `HandoffCoordinator`; capability routing, explicit ownership, typed artifacts and circular delegation protection
+- v3.9 — `TrajectoryCase`, `TrajectoryStep`, `TrajectoryEvaluator`, `TrajectoryPolicy`; task success is separated from process health, efficiency, handoff/recovery correctness and critical violations
+- v4.0 — `RunRecord`, `RunJob`, `InMemoryRunStore`, `InMemoryRunQueue`, `ProductionControlPlane`; tenant-scoped runs, optimistic revisions, stale-job rejection, cancellation and approval resume are explicit
 
-The Agent track deliberately keeps planning, execution, memory, approval, recovery and handoff boundaries separate. A model may propose actions or delegations, but dependency execution, concurrency, side-effect policy, replay safety, ownership and hard stops remain application-side controls.
+The teaching runtime stays provider-neutral and offline-first. In-memory stores/queues/checkpoints validate control-plane contracts; they are not presented as production infrastructure.
 
-Durable execution does **not** claim universal exactly-once semantics. A process can crash after an external side effect but before a committed checkpoint; non-idempotent IN_FLIGHT actions therefore require reconciliation unless the external service genuinely supplies an idempotency contract.
-
-Framework-specific orchestration is intentionally deferred. LangGraph comes in the next capability track after the underlying loop/state/checkpoint problems are understood.
+Framework-specific orchestration is intentionally deferred until now. The next track is LangChain / LangGraph, mapping these already-understood loop/state/checkpoint/interrupt semantics to a mainstream framework.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
