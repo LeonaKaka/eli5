@@ -14,7 +14,7 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 - 07 class, dataclass, mutable defaults, composition, AgentState · v0.7
 - 08 pytest, mock/fake, test layers, runnable Research Agent Lite · v1.0
 
-### LLM Application Engineering — 8/10 live
+### LLM Application Engineering — 10/10 complete
 - 01 Model API / Request Lifecycle ✅
 - 02 Messages / Instructions / Conversation State ✅
 - 03 Tokens / Context Window / Context Engineering / Caching ✅
@@ -23,8 +23,8 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 - 06 Structured Outputs / JSON Schema / Pydantic / refusal ✅
 - 07 Tool / Function Calling / permission / execution boundary ✅
 - 08 Multimodal / Files / asset lifecycle / provenance ✅
-- 09 Model Selection / Cost / Latency / Reliability
-- 10 Evals / Prompt Lifecycle / Production Safety
+- 09 Model Routing / Cost / Latency / Reliability ✅
+- 10 Evals / Prompt Lifecycle / Production Safety ✅
 
 Full scope: `docs/llm-app-roadmap.md`.
 
@@ -39,7 +39,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across both tracks. Python closed at v1.0; the LLM lessons keep evolving it toward Research Assistant v2.0. It remains offline-first so tests are deterministic and no API key is required yet.
+`projects/research-agent-lite/` is the same project across both tracks. Python closed at v1.0; the LLM track evolves it into **Research Assistant v2.0**. It remains offline-first so tests are deterministic and no API key is required for the teaching architecture.
 
 ```bash
 cd projects/research-agent-lite
@@ -61,8 +61,12 @@ pytest -q
 - v1.6 — Pydantic structured-result contracts, validation and refusal shape
 - v1.7 — provider-neutral ToolCall / ToolRegistry / ToolExecutor with schema + permission boundary
 - v1.8 — AssetRef / SourceRef / PreparedAsset pipeline with size policy and provenance
+- v1.9 — ModelRouter with capability gates, weighted priorities and explicit fallbacks
+- v2.0 — EvalCase / EvalReport / RegressionGate with critical-slice regression blocking
 
-Planned next: model routing, usage/cost/latency accounting, fallback policy, and an eval/prompt-lifecycle suite.
+## Next track
+
+RAG: document parsing → chunking → embeddings → retrieval → hybrid search → reranking → citations → RAG evaluation.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
