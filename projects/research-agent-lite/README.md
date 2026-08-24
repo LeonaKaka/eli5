@@ -1,23 +1,15 @@
-# Research Assistant v5.0
+# Research Assistant v5.2
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
-Python closed at **Research Agent Lite v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.0**, Agent Engineering at **v4.0**, and the LangChain / LangGraph track now closes at **Research Assistant v5.0**.
+Python closed at **v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.0**, Agent Engineering at **v4.0**, LangChain / LangGraph at **v5.0**, and the FastAPI track now evolves the same system toward **v6.0**.
 
-## Framework increments
+## FastAPI increments
 
-- **v4.1** — first real compiled `StateGraph`
-- **v4.2** — typed graph state, reducers and conditional routing
-- **v4.3** — `@tool`, `ToolNode`, `tools_condition`, correlated `ToolMessage.tool_call_id`
-- **v4.4** — `Command(update=..., goto=...)` and `Send` dynamic fan-out/fan-in
-- **v4.5** — `InMemorySaver`, `thread_id`, StateSnapshot/history/update-state
-- **v4.6** — real `interrupt()` + `Command(resume=...)` and unsafe replay demo
-- **v4.7** — `BaseStore`/`InMemoryStore`, Runtime context, namespace design, cross-thread memory + existing `MemoryWritePolicy`
-- **v4.8** — shared/private subgraphs and `Command.PARENT` handoff
-- **v4.9** — real `AgentMiddleware` hook contract plus LangGraph v2 `updates` / `values` / `custom` streaming
-- **v5.0** — `ProductionGraphBridge` connecting LangGraph thread/checkpoint/interrupt semantics to the existing tenant-scoped `ProductionControlPlane`
+- **v5.1** — first real `FastAPI()` application around the existing product Run model; `POST /runs` creates a queued Run and `GET /runs/{run_id}` reads it. Long Agent work remains behind the Queue/Worker boundary instead of executing inline in the request.
+- **v5.2** — explicit Pydantic `CreateRunRequest` / `RunResponse`, `Annotated + Depends` tenant/runtime dependencies, tenant-scoped lookup, response filtering and OpenAPI-visible header requirements.
 
-The project depends on `langchain>=1.3,<2` and `langgraph>=1.2,<2`. The course keeps framework demos provider-free where possible, so the Graph and control-plane examples do not require an external model key.
+Current FastAPI reference line used by the course: `fastapi>=0.141,<1` with Pydantic v2. The project keeps `fastapi[standard]` so the local developer install also includes the standard server/test tooling.
 
 ## Run
 
@@ -26,79 +18,65 @@ python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest -q
+
+# Development HTTP server
+uvicorn app.fastapi_app:app --reload
 ```
+
+Then inspect `/docs` or `/openapi.json` and call:
+
+```text
+POST /runs
+GET  /runs/{run_id}
+```
+
+Both currently require the teaching header `X-Tenant-ID`. It is deliberately **not** presented as production authentication; lesson 06 replaces that trust model with authenticated identity + authorization.
 
 ## Current structure
 
 ```text
 app/
-├── langgraph_basics.py          # v4.1-v4.2 StateGraph / typed state / reducers
-├── langgraph_tools.py           # v4.3 ToolNode / tools_condition
-├── langgraph_control_flow.py    # v4.4 Command / Send
-├── langgraph_persistence.py     # v4.5 thread / checkpointer / history
-├── langgraph_interrupts.py      # v4.6 interrupt / resume
-├── langgraph_store.py           # v4.7 BaseStore / Runtime context / memory policy
-├── langgraph_subgraphs.py       # v4.8 shared/private subgraphs / Command.PARENT
-├── langgraph_observability.py   # v4.9 AgentMiddleware + v2 stream modes
-├── langgraph_production.py      # v5.0 ProductionGraphBridge
-├── production.py                # tenant RunStore / Queue / revisions / cancel
-├── approval.py                  # application approval policy
-├── durable.py                   # replay safety / reconcile contracts
-├── trajectory_eval.py           # process-level Agent eval
+├── fastapi_app.py               # v5.1-v5.2 HTTP boundary / contracts / dependencies
+├── langgraph_production.py      # v5.0 Product control-plane ↔ LangGraph bridge
+├── production.py                # tenant RunStore / Queue / optimistic revisions / cancel
+├── langgraph_observability.py   # middleware + stream concepts
+├── langgraph_store.py           # Store / memory boundary
+├── langgraph_interrupts.py      # durable pause/resume
 └── ...
 
 tests/
-├── test_langgraph_basics.py
-├── test_langgraph_tools_control.py
-├── test_langgraph_persistence_interrupts.py
-├── test_langgraph_store_subgraphs.py
+├── test_fastapi_contracts.py
 ├── test_langgraph_observability_production.py
 └── ...
 ```
 
-## v4.9 middleware and streaming boundary
+## HTTP boundary
 
-`CallBudgetMiddleware` is a real LangChain `AgentMiddleware` with `before_model` / `after_model` hooks. It demonstrates why budget/logging/guardrail logic belongs in cross-cutting runtime policy rather than being copied into every business node.
+`POST /runs` does **not** call `graph.invoke()` for a long-lived Agent run. It creates a product Run through `ProductionGraphBridge.submit()`, which records the Run and enqueues work. This keeps HTTP request lifetime separate from durable job lifetime.
 
-`build_streaming_graph()` is a provider-free real LangGraph that emits v2 stream envelopes. `updates` exposes node updates, `values` exposes full state snapshots, and `custom` uses `get_stream_writer()` for business progress. Product streaming, operational telemetry and eval traces remain distinct consumers even when they originate from the same run.
+The public `RunResponse` is intentionally smaller than internal `RunRecord`. Internal `tenant_id`, checkpoint ids, approval request ids and budgets are not returned merely because they exist in memory. The response model is an API projection, not a dump of the control-plane object.
 
-## v5.0 production boundary
+## Tenant dependency boundary
 
-`ProductionGraphBridge` intentionally composes two state systems instead of pretending one replaces the other:
+`TenantContext` is injected through `Annotated[..., Depends(...)]`. The current header-derived tenant exists only so lessons 01–02 can demonstrate dependency wiring, tenant isolation and OpenAPI integration. A real client must not be able to self-assert any tenant simply by choosing a header value; later security lessons derive tenant/workspace scope from authenticated identity and explicit authorization.
 
-### LangGraph owns
-- graph State / reducers / routing
-- `thread_id`
-- checkpoints and history
-- `interrupt()` / `Command(resume=...)`
-- Store / subgraphs / stream
+Cross-tenant lookup currently returns the same 404 as a missing Run to avoid confirming another tenant's resource existence. This is a deliberate anti-enumeration choice, not a universal rule for every API.
 
-### Application control plane owns
-- tenant-scoped `run_id`
-- product run status and optimistic revision
-- queue claim / stale job and stale worker rejection
-- cancellation semantics
-- approval request identity and actor authorization
-- mapping an authorized product run to its graph `thread_id`
+## Tests added for v5.1-v5.2
 
-### Infrastructure owns
-- durable DB/checkpointer/Store implementations
-- durable queue/broker
-- worker lease / heartbeat / watchdog
-- secrets, networking, scaling and telemetry backend
+`test_fastapi_contracts.py` locks:
 
-The bridge demonstrates the critical handshake: when LangGraph interrupts, the graph checkpoint id is written into the product RunRecord before entering `WAITING_APPROVAL`. An approval does not become `Command(resume=True)` until the application validates tenant, run, request id and actor authorization, then emits a new RESUME job. Duplicate queue deliveries are rejected by product revision before they advance the graph.
+- `POST /runs` → `201 Created`, normalized objective, `QUEUED` state and exactly one queued job
+- `GET /runs/{id}` → 200; missing Run → 404
+- blank body / unknown fields / missing required tenant header → 422
+- another tenant cannot enumerate a Run
+- public response does not leak internal control-plane fields
+- generated OpenAPI includes the Run routes, 201 response and required `X-Tenant-ID` header
 
-## Safety boundaries that remain true at v5.0
+## What FastAPI does not replace
 
-- `thread_id` is not an authorization token.
-- Checkpoint persistence is not queue/worker CAS.
-- `interrupt()` is not an approval policy.
-- Graph replay does not create universal exactly-once side effects.
-- Store namespaces do not replace tenant ACLs or memory write policy.
-- Subgraphs do not automatically justify multi-agent architecture.
-- Product cancellation is not the same as reaching Graph `END`.
+FastAPI owns HTTP parsing, routing, dependency wiring, response serialization and OpenAPI. It does not replace durable queueing, worker claims/revisions, LangGraph checkpoint/interrupt semantics, tenant authorization, side-effect idempotency or cancellation policy.
 
-## Next track
+## Next step
 
-FastAPI. The next capability line will expose the existing v5.0 lifecycle through real HTTP contracts: create run, read status, stream progress, resolve approval and cancel safely.
+FastAPI 03–04: async request boundaries / blocking work / Queue+Worker separation, then Server-Sent Events that project safe Run/Graph progress to clients without exposing internal debug state.
