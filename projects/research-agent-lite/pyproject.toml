@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "research-assistant-eli5"
-version = "2.0.0"
-description = "Provider-neutral Research Assistant built across the ELI5 Python and LLM application engineering courses"
+version = "2.2.0"
+description = "Provider-neutral Research Assistant built across the ELI5 Python, LLM and RAG engineering courses"
 requires-python = ">=3.11"
 dependencies = [
   "pydantic>=2.7,<3",
