@@ -148,6 +148,12 @@ class ApprovalManager:
         if not reviewer.strip():
             raise ValueError("reviewer is required")
 
+        current_fingerprint = tool_call_fingerprint(request.call)
+        if current_fingerprint != request.fingerprint:
+            raise ValueError(
+                f"approval request fingerprint mismatch: {request_id}; proposed action changed after review was requested"
+            )
+
         if not approved:
             resolved = request.model_copy(
                 update={"status": ApprovalStatus.DENIED, "reviewer": reviewer}
