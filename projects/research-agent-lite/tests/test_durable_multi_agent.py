@@ -151,6 +151,32 @@ def test_retryable_recorded_failure_can_resume_and_then_commit() -> None:
     assert calls == 2
 
 
+def test_retryable_timeout_does_not_override_non_idempotent_replay_safety() -> None:
+    calls = 0
+
+    def ambiguous_timeout(message: str):
+        nonlocal calls
+        calls += 1
+        raise TimeoutError(f"outcome unknown for {message}")
+
+    runner = DurableActionRunner(
+        executor=make_executor(ambiguous_timeout, permission=Permission.SIDE_EFFECT)
+    )
+    checkpoint = runner.prepare(
+        durable_action(replay_safety=ReplaySafety.NON_IDEMPOTENT)
+    )
+    failed = asyncio.run(runner.execute_prepared(checkpoint.id, approved=True))
+    assert failed.stage is CheckpointStage.FAILED
+    assert failed.result is not None and failed.result.error is not None
+    assert failed.result.error.retryable
+
+    decision = runner.recovery_decision(checkpoint.id)
+    assert decision.action is RecoveryAction.RECONCILE
+    with pytest.raises(RuntimeError, match="requires reconcile"):
+        asyncio.run(runner.resume(checkpoint.id, approved=True))
+    assert calls == 1
+
+
 def directory() -> AgentDirectory:
     result = AgentDirectory()
     result.register(
