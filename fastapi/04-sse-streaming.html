@@ -1,0 +1,62 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 04 · SSE Streaming</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi34.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">04 · Research Assistant v5.4</span><h1>POST 只负责提交 Run。<br>那“运行中发生了什么”就应该走独立 stream。</h1><p class="lead">对于 Agent 这种主要是服务端向客户端推状态的长任务，SSE 很合适：HTTP 语义简单、浏览器原生支持 EventSource、天然有 `id / event / data`，还能通过 <b>Last-Event-ID</b> 做断线续传。真正难的不是“会 yield”，而是事件 schema、重连、retention、disconnect、backpressure 和安全投影。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>为什么这里先选 SSE，而不是一上来 WebSocket？</h2><div class="sub">需求是单向“服务器持续推 Run 进度”，不是双向实时控制协议。</div></div></div><table class="table"><tr><th></th><th>SSE</th><th>WebSocket</th></tr><tr><td>方向</td><td>Server → Client</td><td>双向</td></tr><tr><td>协议</td><td>普通 HTTP 长连接</td><td>升级为 WebSocket</td></tr><tr><td>事件 id / reconnect</td><td>协议天然支持</td><td>通常自己设计</td></tr><tr><td>适合本项目</td><td>progress / status / approval notification</td><td>以后若需要高频双向协作再考虑</td></tr></table><div class="callout">不是说 WebSocket 不好，而是别为了“实时”就自动选更复杂的协议。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>FastAPI 现在有原生 SSE response</h2><div class="sub">不需要自己手拼 `text/event-stream` 字符串。</div></div></div><pre>from fastapi.sse import (
+    EventSourceResponse,
+    ServerSentEvent,
+)
+
+@app.get(
+    "/runs/{run_id}/stream",
+    response_class=EventSourceResponse,
+)
+async def stream_run(...):
+    async def source():
+        yield ServerSentEvent(
+            id="17",
+            event="progress",
+            data={
+              "phase": "retrieve",
+              "progress": 35,
+            },
+        )
+
+    return EventSourceResponse(source())</pre><div class="callout"><b>FastAPI 的 SSE response 还会处理常见基础细节：</b>空闲连接 keep-alive ping、`Cache-Control: no-cache`、以及避免某些代理缓冲。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>一条 SSE 事件在线上长什么样？</h2></div></div><pre>id: 18
+event: progress
+data: {"run_id":"run-42","phase":"rerank","progress":60}
+
+id: 19
+event: completed
+data: {"run_id":"run-42","status":"completed","progress":100}</pre><p>这里 `id` 不是数据库主键，而是客户端重连 cursor；`event` 是客户端可路由的稳定类型；`data` 是公开 payload。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Interactive：断线 + Last-Event-ID 重连</h2><div class="sub">先连接，模拟收到前两条后断线，再重连。</div></div></div><div class="sse-lab"><div class="sse-controls"><button class="btn primary" id="sseConnect">连接</button><button class="btn" id="sseDisconnect">收到 #2 后断线</button><button class="btn" id="sseReconnect">带 Last-Event-ID 重连</button><button class="btn" id="sseDropHistory">模拟 retention 截断</button><button class="btn" id="sseReset">Reset</button></div><div class="cursor-card">客户端 cursor：<code>Last-Event-ID: <span id="sseCursor">0</span></code></div><div class="sse-grid"><div class="sse-pane"><b>服务端事件日志</b><div id="sseEvents"></div><div class="retention-strip"><span class="retention-pill" data-retention-id="1">#1</span><span class="retention-pill" data-retention-id="2">#2</span><span class="retention-pill" data-retention-id="3">#3</span><span class="retention-pill" data-retention-id="4">#4</span><span class="retention-pill" data-retention-id="5">#5</span></div></div><div class="sse-pane"><b>Wire</b><pre class="sse-wire" id="sseWire">点击“连接”开始 SSE 模拟</pre><div class="sse-status" id="sseStatus">尚未连接</div></div></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>v5.4：事件先变成 client-safe schema，再变成 SSE</h2><div class="sub">不要把 LangGraph `values/debug` 原样暴露。</div></div></div><div class="projection-stack"><div class="projection-box bad"><b>内部世界</b><pre>tenant_id
+checkpoint_id
+approval_request_id
+budget
+raw graph state
+Tool arguments
+__interrupt__</pre></div><span class="arrow">→ projection →</span><div class="projection-box good"><b>RunStreamEvent</b><pre>sequence
+run_id
+event
+status?
+phase?
+progress?
+message?</pre></div></div><p>项目里的 `RunStreamEvent` 根本不接受那些内部字段，因此 SSE adapter 没机会“不小心 model_dump 全部”。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>重连不是“重新开连接”这么简单</h2><div class="sub">你必须回答：客户端错过的事件从哪里补？</div></div></div><pre>Last-Event-ID: 17
+
+server:
+list_after(after_sequence=17)
+→ #18
+→ #19
+→ #20</pre><p>所以 SSE 需要某种 event log / cursor storage。当前课程版 `InMemoryRunEventStore` 是有界内存日志，只为验证协议；多 Worker / 重启环境必须换 durable broker、数据库日志或流系统。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>如果客户端断得太久，历史已经被 retention 清掉呢？</h2><div class="sub">最糟糕的是静默从“当前剩余事件”继续，让客户端误以为历史完整。</div></div></div><div class="flow"><div class="node">client cursor = 1</div><span class="arrow">→</span><div class="node">server oldest = 4</div><span class="arrow">→</span><div class="node">history gap</div><span class="arrow">→</span><div class="node">409 + refetch state</div></div><div class="callout bad"><b>不要伪造完整性。</b>如果事件日志已经无法满足 resume cursor，就明确告诉客户端先重新 GET `/runs/{id}` 建立新的事实基线。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Disconnect / heartbeat / backpressure 分别是谁的问题？</h2></div></div><table class="table"><tr><th>问题</th><th>本课处理</th><th>生产还要考虑</th></tr><tr><td>空闲连接被 proxy 关闭</td><td>SSE ping / no-cache / no buffering</td><td>LB idle timeout 配置</td></tr><tr><td>客户端主动断开</td><td>`request.is_disconnected()` / cancellation</td><td>不要继续做只为这个连接服务的 work</td></tr><tr><td>客户端读得慢</td><td>yield/send 会产生流控</td><td>bounded buffer、慢消费者策略</td></tr><tr><td>服务重启</td><td>课程内存日志会丢</td><td>durable event log + Last-Event-ID</td></tr></table></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Worker 可以发事件，但 SSE endpoint 不应该成为 Worker</h2><div class="sub">stream 只是读取进度，不负责执行 Agent。</div></div></div><div class="flow"><div class="node">Worker</div><span class="arrow">→</span><div class="node">Event Store / Broker</div><span class="arrow">→</span><div class="node">GET /stream</div><span class="arrow">→</span><div class="node">Browser</div></div><pre># worker
+outcome = await run_one_worker_tick(...)
+events.append(event="completed", ...)
+
+# API stream
+for item in events.list_after(cursor):
+    yield ServerSentEvent(...)</pre><div class="callout">这条数据流很重要：用户断开 SSE 不应该导致 Worker 丢 ownership，也不应该自动 cancel Run。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>Research Assistant v5.4 · 面试验收</h2></div></div><div class="quiz" data-quiz><h4>客户端带 `Last-Event-ID: 20` 重连，但服务端 retention 最早只剩 #30。最稳的行为是什么？</h4><button class="option" data-feedback="静默从 30 开始会让客户端误以为没有丢历史。">A. 直接从 #30 继续，不告诉客户端</button><button class="option" data-correct="1">B. 明确返回 history gap/conflict，让客户端先 GET 当前 Run state，再建立新 cursor</button><button class="option" data-feedback="重跑整个 Agent 不是 SSE reconnect 的语义。">C. 自动重跑整个 Agent</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① SSE 与 WebSocket 怎么选？② `id/event/data` 各自作用？③ Last-Event-ID 如何实现断线续传？④ heartbeat 和业务 event 有何区别？⑤ 为什么 raw Graph debug 不能直接推前端？⑥ retention gap 怎么处理？⑦ SSE 客户端断线为什么不等于 cancel Run？⑧ 多 Worker 下 event log 应放哪？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi04">我能设计可重连、有限保留、tenant-safe 的 SSE Run stream，而不是只会 yield 字符串</label></div></section><div class="footer">下一批：05 Approval / Cancel / Idempotent Commands + 06 Auth / Security / CORS。开始把“能调用”推进到“能安全调用”。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi34.js"></script></body></html>
