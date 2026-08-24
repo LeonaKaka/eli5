@@ -24,11 +24,11 @@ Document parsing → chunking → embeddings → ANN/HNSW → BM25/hybrid → re
 
 Full scope: `docs/rag-roadmap.md`.
 
-### Agent Engineering — 2/10 live
+### Agent Engineering — 4/10 live
 - 01 Agent Loop / observe → decide → act → update → stop/continue ✅
 - 02 State Machine / Stop Conditions / Run Budgets / LoopGuard ✅
-- 03 Planning / Replanning
-- 04 Memory Architecture / Write Policy
+- 03 Planning / Replanning / dependencies / progress / plan drift ✅
+- 04 Memory Architecture / write policy / scope / contamination / invalidation ✅
 - 05 Multi-step Tool Orchestration
 - 06 Human-in-the-loop / Guardrails / Approval
 - 07 Recovery / Durable Execution
@@ -49,7 +49,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and the Agent track is now at **Research Assistant v3.2**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, and the Agent track is now at **Research Assistant v3.4**.
 
 ```bash
 cd projects/research-agent-lite
@@ -63,8 +63,10 @@ pytest -q
 
 - v3.1 — `AgentDecision`, `AgentObservation`, `AgentContext`, `AgentLoop`, `AgentRunResult`, trajectory trace
 - v3.2 — `RunStatus`, `StopReason`, `RunBudget`, `AgentControlState`, `LoopGuard`
+- v3.3 — `Plan`, `PlanStep`, `ProgressSignal`, `ReplanPolicy`, revision-preserving replans
+- v3.4 — `MemoryWritePolicy`, `MemoryStore`, scoped memory, invalidation and bilingual deterministic retrieval baseline
 
-The first Agent lessons deliberately reuse the existing `ToolExecutor` permission boundary. A model may propose the next action, but execution, budgets and hard stop conditions remain application-side.
+The first Agent lessons deliberately reuse the existing `ToolExecutor` permission boundary. A model may propose the next action, but execution, budgets, hard stop conditions, replan triggers and long-term memory writes remain application-side controls.
 
 Framework-specific orchestration is intentionally deferred. LangGraph comes in the next capability track after the underlying loop/state/checkpoint problems are understood.
 
