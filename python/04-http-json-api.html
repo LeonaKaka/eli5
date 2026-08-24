@@ -1,0 +1,56 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Python 04 · HTTP、JSON 与 API</title><link rel="stylesheet" href="../assets/styles.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Python<small>for AI Agent Engineering</small></div><div class="nav-label">Python</div><nav class="nav"><a href="../"><span class="num">⌂</span>课程首页</a><a href="01-basics.html"><span class="num">01</span>数据积木与执行</a><a href="02-types-pydantic.html"><span class="num">02</span>函数与数据契约</a><a href="03-project-structure.html"><span class="num">03</span>模块与项目结构</a><a class="active" href="04-http-json-api.html"><span class="num">04</span>HTTP · JSON · API</a></nav><div class="progress-box"><div class="progress-row"><span>Python 进度</span><span id="progressPct">0%</span></div><div class="progress"><i id="progressBar"></i></div></div></aside><main class="content"><section class="hero"><span class="kicker">Python 04 · Research Agent v0.4</span><h1>调用 LLM，<br>本质上是在“发一封结构化网络请求”。</h1><p class="lead">Python 并不会天然“连接 AI”。你的代码只是通过 <b>HTTP</b> 把请求送到另一个服务，再把对方返回的 <b>JSON</b> 解析回来。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先把“调用模型”的魔法拆掉</h2><div class="sub">SDK 写得再漂亮，底层仍然逃不开 Request → Network → Response。</div></div></div><div class="goal"><b>本课目标：</b>你能解释 method、URL、headers、body、status code、JSON、timeout；能用 httpx 写出一个边界清楚的 API client。</div><div class="network-visual"><div class="endpoint"><span class="big-icon">🐍</span><b>你的 Python</b><small>准备 request</small></div><div class="wire"><span>POST + JSON</span><i></i><span>200 + JSON</span></div><div class="endpoint"><span class="big-icon">🧠</span><b>远程服务</b><small>LLM / 搜索 / 数据库 API</small></div></div><div class="callout">以后看到 <code class="inline">client.responses.create(...)</code>、<code class="inline">requests.post(...)</code>、<code class="inline">httpx.post(...)</code>，先问自己：<b>它实际发出的 HTTP request 长什么样？</b></div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>一封 HTTP Request 里到底装什么？</h2><div class="sub">把它想成“寄给指定窗口的一张表单”。</div></div></div><div class="http-parts"><div class="http-part"><strong>METHOD</strong><span>GET / POST / DELETE...</span><p>你想做什么动作。</p></div><div class="http-part"><strong>URL</strong><span>/v1/search</span><p>你要找哪个服务入口。</p></div><div class="http-part"><strong>HEADERS</strong><span>Authorization, Content-Type</span><p>身份、格式、额外元数据。</p></div><div class="http-part"><strong>BODY</strong><span>{ query, top_k }</span><p>真正要交给服务的数据。</p></div></div><h3>GET 和 POST 先这样掌握</h3><table class="table"><tr><th></th><th>GET</th><th>POST</th></tr><tr><td>直觉</td><td>“给我看看这个资源”</td><td>“拿这份数据去处理/创建东西”</td></tr><tr><td>数据常放</td><td>URL query params</td><td>request body</td></tr><tr><td>AI 常见</td><td>查状态、取资源</td><td>提交 prompt、检索请求、创建任务</td></tr></table><div class="callout warn"><b>不是绝对规则：</b>HTTP 设计还涉及幂等性、缓存、REST 语义。现在先建立正确直觉，不需要背 RFC。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>互动：自己组一个 Request，看它怎么穿过网络</h2><div class="sub">这是模拟器，不会真的发到公网，也不会保存任何 key。</div></div></div><div class="http-lab" id="httpLab"><div class="request-editor"><label>Method<select id="httpMethod"><option>POST</option><option>GET</option></select></label><label>URL<input id="httpUrl" value="https://api.example.com/v1/search"></label><label>JSON Body<textarea id="httpBody">{
+  "query": "RAG evaluation",
+  "top_k": 5
+}</textarea></label><div class="controls"><button class="btn primary" id="sendHttp">发送模拟请求</button><button class="btn" id="httpScenario">切换失败场景</button></div></div><div class="http-console"><div class="console-head">Network Console</div><div id="httpTrace" class="console-body">等待发送...</div></div></div><div class="callout bad"><b>重要：</b>真实 API key 永远不要塞进这个静态页面。前端源码对所有访问者可见。生产系统应该让后端从环境变量读取密钥。</div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>JSON：只是“双方约定的数据文本格式”</h2><div class="sub">Python dict 和 JSON 长得像，但不是同一个东西。</div></div></div><div class="json-bridge"><div class="bridge-card"><b>Python 对象</b><pre>payload = {
+  "query": "RAG",
+  "top_k": 5,
+}</pre></div><div class="bridge-arrow">serialize →</div><div class="bridge-card"><b>网络里的 JSON 文本</b><pre>{"query":"RAG","top_k":5}</pre></div><div class="bridge-arrow">→ parse</div><div class="bridge-card"><b>对方程序对象</b><p>JavaScript object、Go struct、Java class…语言可以完全不同。</p></div></div><div class="code-wrap"><button class="copy">复制</button><pre>import json
+
+payload = {"query": "RAG", "top_k": 5}
+
+text = json.dumps(payload)   # Python dict → JSON str
+data = json.loads(text)      # JSON str → Python object</pre></div><div class="quiz" data-quiz><h4>哪个说法更准确？</h4><button class="option" data-feedback="dict 是 Python 数据结构；JSON 是跨语言的文本数据格式。">A. Python dict 就是 JSON，只是名字不同</button><button class="option" data-correct="1">B. dict 可以序列化成 JSON；JSON 解析后常得到 Python dict/list</button><button class="option" data-feedback="JSON 不只给浏览器用，服务之间大量通过 JSON 通信。">C. JSON 只用于网页前端</button><div class="feedback"></div></div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Status Code：服务端先给你一个“结果类别”</h2><div class="sub">不要只会看 200。Agent 调外部服务时，状态码直接决定你下一步该怎么办。</div></div></div><div class="status-grid"><div class="status ok"><b>2xx</b><span>请求成功</span><p>继续解析结果。</p></div><div class="status warn"><b>4xx</b><span>请求/权限/频率问题</span><p>通常先检查自己发了什么。</p></div><div class="status err"><b>5xx</b><span>服务端失败</span><p>可能是临时故障，可考虑有限重试。</p></div></div><table class="table"><tr><th>状态</th><th>AI 工程里常见含义</th><th>第一反应</th></tr><tr><td>400</td><td>JSON/schema/参数错误</td><td>别重试同一个坏请求，先修数据</td></tr><tr><td>401 / 403</td><td>认证或权限错误</td><td>检查 key / scope / 账号权限</td></tr><tr><td>404</td><td>资源/endpoint 不存在</td><td>检查 URL / ID</td></tr><tr><td>429</td><td>rate limit / quota</td><td>读取限制信息，等待后有限重试</td></tr><tr><td>500 / 503</td><td>供应商服务异常</td><td>记录日志，考虑 backoff / fallback</td></tr></table><div class="callout">第 06 课会专门把 retry、backoff、fallback 做成完整 Failure Engineering。这里先记住：<b>不是所有失败都应该重试。</b></div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>第一次用 httpx：别让 SDK 遮住网络基础</h2><div class="sub">先写最普通的 client，再去用 OpenAI / Anthropic SDK，你会知道框架替你做了什么。</div></div></div><div class="code-wrap"><button class="copy">复制</button><pre>import httpx
+
+payload = {
+    "query": "RAG evaluation",
+    "top_k": 5,
+}
+
+response = httpx.post(
+    "https://api.example.com/v1/search",
+    json=payload,
+    headers={
+        "Authorization": "Bearer ...",
+    },
+    timeout=10.0,
+)
+
+response.raise_for_status()
+data = response.json()</pre></div><h3>逐行到底发生了什么</h3><div class="timeline"><div class="step active"><div class="dot">1</div><div class="body"><b>httpx 把 dict 序列化</b><p><code class="inline">json=payload</code> 会准备 JSON body 和相应 Content-Type。</p></div></div><div class="step active"><div class="dot">2</div><div class="body"><b>网络等待</b><p>程序等待 DNS/TCP/TLS/服务端处理和响应。这里正是后面 async 能发挥作用的地方。</p></div></div><div class="step active"><div class="dot">3</div><div class="body"><b>raise_for_status()</b><p>4xx/5xx 不再静默当成“正常结果”继续往下跑。</p></div></div><div class="step active"><div class="dot">4</div><div class="body"><b>response.json()</b><p>把响应 JSON 解析成 Python 对象，后续才能交给 Pydantic / Agent。</p></div></div></div><div class="callout warn"><b>为什么要 timeout？</b>没有超时边界，外部服务如果长时间不返回，你的请求、worker、Agent task 都可能一直挂着占资源。</div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>错误示范：一段“能跑”的 API 代码有哪些隐患？</h2><div class="sub">真正面试常问的不是 httpx.post 会不会写，而是你有没有边界意识。</div></div></div><div class="code-wrap"><button class="copy">复制</button><pre>def call_api(data):
+    response = httpx.post(URL, json=data)
+    return response.json()</pre></div><div class="bug-grid"><div><b>❌ 没 timeout</b><p>请求可能无限等。</p></div><div><b>❌ 不检查 status</b><p>500 返回的错误 JSON 也可能被当正常业务数据。</p></div><div><b>❌ 没验证 response schema</b><p>供应商结构一变，错误会在更深处才爆。</p></div><div><b>❌ client 层职责不清</b><p>如果这里顺便决定 Agent retry/fallback，网络层和业务编排又混在一起。</p></div></div><h3>更健康的边界</h3><div class="code-wrap"><button class="copy">复制</button><pre>class SearchClient:
+    def __init__(self, base_url: str, api_key: str):
+        self.base_url = base_url
+        self.api_key = api_key
+
+    def search(self, request: SearchRequest) -> SearchResponse:
+        response = httpx.post(
+            f"{self.base_url}/v1/search",
+            json=request.model_dump(),
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        return SearchResponse.model_validate(response.json())</pre></div><div class="callout">注意它只负责：<b>把合法请求送出去 → 把合法响应带回来</b>。要不要 retry、换备用服务、告诉用户失败，仍然可以留给更上层 Agent / service 决策。</div></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Research Agent v0.4：第一次真正跨出本机</h2><div class="sub">03 的目录结构现在开始有意义：网络 client 自然落在 services/。</div></div></div><div class="flow"><div class="node">main.py</div><span class="arrow">→</span><div class="node">agents/<br>ResearchAgent</div><span class="arrow">→</span><div class="node">services/<br>SearchClient</div><span class="arrow">HTTP</span><div class="node">外部 API</div></div><div class="code-wrap"><button class="copy">复制</button><pre>app/
+├── agents/
+│   └── research_agent.py
+├── models/
+│   ├── requests.py
+│   └── responses.py
+├── services/
+│   └── search_client.py   # HTTP 边界
+└── main.py</pre></div><div class="exercise"><b>练习 A · 判断错误</b><p>接口返回 401。应该：① 立刻 retry 10 次；② 检查认证配置；③ 把 JSON 继续交给 Agent。选哪个，为什么？</p><details><summary>答案</summary><p>②。401 通常不是“再试一次就会好”的临时故障。应检查 key、权限或认证头。</p></details></div><div class="exercise"><b>练习 B · 设计响应模型</b><p>API 返回 <code>{"items": [...], "took_ms": 84}</code>。用 Pydantic 定义一个最小 SearchResponse。</p><details><summary>参考答案</summary><pre>from pydantic import BaseModel
+
+class SearchResponse(BaseModel):
+    items: list[dict]
+    took_ms: int</pre></details></div><div class="callout interview"><b>面试验收：</b>① HTTP request 的 method/url/headers/body 分别是什么？② dict 与 JSON 的区别？③ 400/401/429/500 分别该怎么理解？④ 为什么外部 API 必须有 timeout？⑤ raise_for_status() 的价值？⑥ 为什么 API key 不能进纯前端？⑦ SDK 和直接 httpx 调用是什么关系？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="python04">我能独立解释一次 API 调用并写出 client</label></div></section><div class="footer">下一批：Python 05 async / await + 06 Failure Engineering。它们会把“等待网络”和“网络会失败”这两个真实问题彻底讲透。</div></main></div><script src="../assets/app.js"></script></body></html>
