@@ -1,0 +1,42 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Python 01 · 数据积木与执行</title><link rel="stylesheet" href="../assets/styles.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Python<small>for AI Agent Engineering</small></div><div class="nav-label">Python</div><nav class="nav"><a href="../"><span class="num">⌂</span>课程首页</a><a class="active" href="01-basics.html"><span class="num">01</span>数据积木与执行</a><a href="02-types-pydantic.html"><span class="num">02</span>函数与数据契约</a></nav><div class="progress-box"><div class="progress-row"><span>首批课程进度</span><span id="progressPct">0%</span></div><div class="progress"><i id="progressBar"></i></div></div></aside><main class="content"><section class="hero"><span class="kicker">Python 01 · Research Agent v0.1</span><h1>程序不是“语法集合”。<br>它是在不断搬、改、判断数据。</h1><p class="lead">这一课不从“什么是变量”开始背定义。先看一个最小 Research Agent 为什么需要 <b>str、list、dict、if、for、function</b>，再亲手让状态变化。</p></section><section class="section" id="problem"><div class="section-head"><div class="section-index">1</div><div><h2>先看问题：Agent 到底要记住什么？</h2><div class="sub">用户问了一句话，但系统不能只保存一句字符串。</div></div></div><div class="goal"><b>先形成直觉：</b>Agent 的“脑内状态”本质是一组不断变化的数据。</div><div class="flow"><div class="node">用户问题<br><small>str</small></div><span class="arrow">→</span><div class="node">消息历史<br><small>list[dict]</small></div><span class="arrow">→</span><div class="node">重试次数<br><small>int</small></div><span class="arrow">→</span><div class="node">是否结束<br><small>bool</small></div></div><div class="code-wrap"><button class="copy">复制</button><pre>question = "帮我找 3 篇 RAG 论文"
+
+state = {
+    "messages": [
+        {"role": "user", "content": question}
+    ],
+    "retry_count": 0,
+    "finished": False,
+}</pre></div><div class="callout">真正值得记的是“形状”：<b>一个 dict 装整个 state；messages 是 list；list 里每一条 message 又是 dict。</b></div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>不要只看代码：亲手改一次 State</h2><div class="sub">点击按钮，观察某个 Python 操作到底改了哪一个格子。</div></div></div><div class="lab"><div class="lab-title">Interactive · Agent State</div><div class="controls"><button class="btn primary" id="incRetry">retry_count += 1</button><button class="btn" id="addMessage">messages.append(...)</button><button class="btn" id="toggleFinished">finished = not finished</button><button class="btn danger" id="resetState">重置</button></div><div class="state-grid"><div class="key">messages</div><div id="messageValue" data-count="1">[1 条 message]</div><div class="key">retry_count</div><div id="retryValue">0</div><div class="key">finished</div><div id="finishedValue">False</div></div></div><h3>你刚才其实已经用了三种不同操作</h3><table class="table"><tr><th>动作</th><th>Python</th><th>为什么不同</th></tr><tr><td>数字加 1</td><td><code class="inline">retry_count += 1</code></td><td>把字段指向的新整数更新回 state</td></tr><tr><td>往 list 追加</td><td><code class="inline">messages.append(x)</code></td><td>直接修改这个 list 对象</td></tr><tr><td>真假切换</td><td><code class="inline">finished = not finished</code></td><td>得到新的 bool 值</td></tr></table><div class="callout warn"><b>这会连接到后面的坑：</b>list / dict 是可变对象，多个变量如果指向同一个对象，一个地方改了，另一个地方也会看到变化。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>变量更像“标签”，不是永久封死的盒子</h2><div class="sub">这是理解 Python 引用、可变对象和很多诡异 bug 的第一步。</div></div></div><div class="grid2"><div class="card"><div class="emoji">🏷️</div><b>变量名 = 标签</b><p><code>a = state</code> 更像再贴一个标签到同一个对象，而不是自动复制一份。</p></div><div class="card"><div class="emoji">🔗</div><b>两个名字可指向同一对象</b><p>因此修改 list/dict 时，要问“我是在改对象，还是让变量重新指向另一个值？”</p></div></div><div class="code-wrap"><button class="copy">复制</button><pre>state = {"retry_count": 0}
+backup = state
+
+backup["retry_count"] += 1
+
+print(state["retry_count"])</pre></div><div class="quiz" data-quiz><h4>预测输出</h4><button class="option" data-feedback="如果 backup 是自动复制，才会是 0；但这里不是。">A. 0</button><button class="option" data-correct="1">B. 1</button><button class="option" data-feedback="这段代码合法，不会因为两个变量指向同一 dict 报错。">C. 报错</button><div class="feedback"></div></div><details><summary>为什么答案是 1？</summary><p><code class="inline">backup = state</code> 没复制 dict；两个变量都指向同一个 dict。通过 backup 修改这个 dict，state 看到的当然也是修改后的对象。</p></details></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>if 和 for：一个负责“选路”，一个负责“重复”</h2><div class="sub">Agent loop 看起来高级，拆开其实就是判断和重复。</div></div></div><div class="grid2"><div class="card"><b>if = 决策</b><div class="code-wrap"><button class="copy">复制</button><pre>if score &gt;= 0.8:
+    keep(paper)
+else:
+    discard(paper)</pre></div><p>条件只决定“这一刻走哪条分支”。</p></div><div class="card"><b>for = 对一组对象逐个处理</b><div class="code-wrap"><button class="copy">复制</button><pre>for paper in papers:
+    score = rank(paper)</pre></div><p>重点是“这一组数据已经存在”。</p></div></div><h3>把执行过程一格格走出来</h3><div class="lab"><div class="lab-title">Trace · 论文筛选</div><div class="code-wrap"><pre>selected = []
+for paper in papers:
+    if paper["score"] &gt;= 0.8:
+        selected.append(paper["title"])</pre></div><div class="controls"><button class="btn primary" id="traceNext">执行下一步</button><button class="btn" id="traceReset">重置轨迹</button></div><div class="trace"><div>① selected = []</div><div>② 取 paper A</div><div>③ score 0.91 ≥ .8</div><div>④ append("A")</div></div></div><div class="callout">以后看到 Agent：<code class="inline">while not finished</code>，也不要被吓到。它只是“只要没结束，就继续下一轮”。</div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>function：把一段行为封装成“可调用工具”</h2><div class="sub">Tool Calling 最终落地时，常常就是模型决定要不要调用某个函数。</div></div></div><div class="flow"><div class="node">LLM<br>“需要搜索”</div><span class="arrow">→</span><div class="node">准备参数<br>query, top_k</div><span class="arrow">→</span><div class="node">Python function<br>search_papers()</div><span class="arrow">→</span><div class="node">返回结果</div></div><div class="code-wrap"><button class="copy">复制</button><pre>def select_good_papers(papers, threshold=0.8):
+    selected = []
+
+    for paper in papers:
+        if paper["score"] &gt;= threshold:
+            selected.append(paper["title"])
+
+    return selected</pre></div><h3>错误示范：函数偷偷依赖全局变量</h3><div class="code-wrap"><button class="copy">复制</button><pre>threshold = 0.8
+
+def select_good_papers(papers):
+    # 能跑，但函数行为偷偷依赖外部状态
+    return [p["title"] for p in papers if p["score"] &gt;= threshold]</pre></div><div class="callout bad"><b>为什么不理想？</b>测试和复用都更难。调用者只看函数签名，不知道 threshold 还藏在外面。下一课我们会把“函数接口必须清楚”推到 Type Hint + Pydantic。</div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Research Agent v0.1：你已经能写第一个真实小部件</h2><div class="sub">这一课不追求调用模型，先把“输入数据 → 过滤 → 输出”做干净。</div></div></div><div class="exercise"><b>任务</b><p>实现一个 <code class="inline">select_good_papers()</code>：输入论文列表和 threshold，返回保留论文的 title；遇到缺少 score 的论文先跳过。</p><details><summary>参考实现</summary><div class="code-wrap"><pre>def select_good_papers(papers, threshold=0.8):
+    selected = []
+
+    for paper in papers:
+        if "score" not in paper:
+            continue
+
+        if paper["score"] &gt;= threshold:
+            selected.append(paper["title"])
+
+    return selected</pre></div></details></div><div class="callout interview"><b>面试验收：</b>① list 和 dict 分别适合什么？② <code>backup = state</code> 为什么不是复制？③ for 和 while 的典型区别？④ function 为什么有利于测试？⑤ Agent state 为什么常见 dict / TypedDict / model？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="python01">我能独立解释并做完本课练习</label></div></section><div class="footer">下一课：函数接口 → Type Hint → Pydantic → LLM Structured Output / Tool Schema</div></main></div><script src="../assets/app.js"></script></body></html>
