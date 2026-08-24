@@ -28,11 +28,11 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 
 Full scope: `docs/llm-app-roadmap.md`.
 
-### RAG Engineering — 2/10 live
+### RAG Engineering — 4/10 live
 - 01 Document Parsing / Document Model / reading order / OCR / provenance ✅
 - 02 Chunking / overlap / structure-aware boundaries / stable chunk ids ✅
-- 03 Embeddings / Semantic Search
-- 04 Vector DB / ANN / HNSW
+- 03 Embeddings / cosine / dot / L2 / model compatibility / batching ✅
+- 04 Vector DB / Exact Search / ANN / HNSW / metadata filtering ✅
 - 05 BM25 / Hybrid Search
 - 06 Reranking
 - 07 Query Rewrite / Multi-query
@@ -53,7 +53,7 @@ Every lesson must include:
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, and the RAG track now evolves it from structured document ingestion toward retrieval and citation evaluation.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, and RAG now evolves it through structured ingestion, embedding and retrieval-index boundaries.
 
 ```bash
 cd projects/research-agent-lite
@@ -68,8 +68,12 @@ pytest -q
 
 - v1.0 — Python engineering baseline
 - v1.1–v2.0 — LLM application engineering boundaries, routing and evals
-- v2.1 — `Document`, `DocumentBlock`, `BlockType`, `DocumentParser` ingestion boundary
-- v2.2 — `ChunkPolicy`, `Chunk`, `StructureAwareChunker` with heading context, atomic tables, overlap and policy versioning
+- v2.1 — `Document`, `DocumentBlock`, `BlockType`, `DocumentParser`
+- v2.2 — `ChunkPolicy`, `Chunk`, `StructureAwareChunker`
+- v2.3 — `EmbeddingProvider`, `EmbeddingService`, versioned `EmbeddingRecord`
+- v2.4 — `VectorIndex`, `ExactVectorIndex`, educational `ApproximateGraphIndex`, ANN recall baseline
+
+The offline toy embedding and graph ANN are teaching adapters, not claims of production semantic quality or a production HNSW implementation.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. No build step, backend, or secret is required for the learning UI.
