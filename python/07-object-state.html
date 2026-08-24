@@ -1,0 +1,58 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Python 07 · Object / State</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/lesson78.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Python<small>for AI Agent Engineering</small></div><div class="nav-label">Python</div><nav class="nav"><a href="../"><span class="num">⌂</span>课程首页</a><a href="01-basics.html"><span class="num">01</span>数据积木</a><a href="02-types-pydantic.html"><span class="num">02</span>数据契约</a><a href="03-project-structure.html"><span class="num">03</span>工程结构</a><a href="04-http-json-api.html"><span class="num">04</span>HTTP / API</a><a href="05-async-await.html"><span class="num">05</span>async / await</a><a href="06-failure-engineering.html"><span class="num">06</span>Failure Engineering</a><a class="active" href="07-object-state.html"><span class="num">07</span>Object / State</a><a href="08-testing-project.html"><span class="num">08</span>Testing + v1.0</a></nav><div class="progress-box"><div class="progress-row"><span>Python 内容</span><span>7 / 8</span></div><div class="progress"><i style="width:87.5%"></i></div></div></aside><main class="content"><section class="hero"><span class="kicker">Python 07 · Research Agent v0.7</span><h1>class 不是为了“高级”。<br>是当一组状态和行为总在一起时，把它们收拢。</h1><p class="lead">前六课后，Agent 已经有 <b>model、tools、messages、retry_count、finished、logging、并发策略</b>。如果这些东西继续散落在函数参数和全局变量里，维护成本会快速上升。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>先看问题：状态开始满天飞</h2><div class="sub">当同一组数据总是一起出现，你会自然想给它一个名字。</div></div></div><pre>model = "model-x"
+tools = ["search", "python"]
+messages = []
+retry_count = 0
+finished = False
+
+async def run_agent(model, tools, messages, retry_count, finished, question):
+    ...</pre><div class="callout bad"><b>不是“不能写”。</b>问题是参数越来越长，而且这些值之间其实有明确关系：它们共同描述“一个 Agent 当前是什么状态”。</div><div class="goal"><b>这一课目标：</b>学会判断什么时候函数就够，什么时候 dataclass/class 更自然；并避免为了 OOP 而 OOP。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>dataclass：先把“状态”装成一个清楚的数据对象</h2><div class="sub">它特别适合“主要用于保存数据，行为不复杂”的对象。</div></div></div><pre>from dataclasses import dataclass, field
+
+@dataclass
+class AgentState:
+    messages: list[dict] = field(default_factory=list)
+    retry_count: int = 0
+    finished: bool = False</pre><div class="object-stage" id="stateObjectLab"><div class="lab-title">Interactive · AgentState</div><div class="controls"><button class="btn primary" id="objAddMessage">add_message()</button><button class="btn" id="objRetry">retry_count += 1</button><button class="btn" id="objFinish">finish()</button><button class="btn danger" id="objReset">重置</button></div><div class="object-card"><h4>AgentState 实例</h4><div class="object-fields"><div class="field">messages</div><div class="value" id="objMessages"></div><div class="field">retry_count</div><div class="value" id="objRetries"></div><div class="field">finished</div><div class="value" id="objFinished"></div></div></div></div><div class="callout">比 dict 多出来的价值不是“更快”，而是<b>字段更明确、IDE 更友好、默认值更集中、对象含义更清楚</b>。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>最经典的坑：可变默认值为什么要 default_factory</h2><div class="sub">list / dict 是可变对象。多个实例共享同一个默认 list 会产生非常隐蔽的状态污染。</div></div></div><div class="mutable-demo" id="sharedDefaultLab"><div class="memory-box"><b>❌ 错误直觉：共享同一 list</b><div class="addr">agent_a.messages → 0xABC</div><div class="list" id="badA"></div><div class="addr">agent_b.messages → 0xABC</div><div class="list" id="badB"></div><button class="btn danger" id="badAppendA">给 A append 一条</button></div><div class="memory-box"><b>✅ 正确：每个实例各自创建 list</b><div class="addr">agent_a.messages → 0x111</div><div class="list" id="goodA"></div><div class="addr">agent_b.messages → 0x222</div><div class="list" id="goodB"></div><button class="btn primary" id="goodAppendA">给 A append 一条</button></div></div><div class="controls"><button class="btn" id="defaultReset">重置实验</button></div><pre>@dataclass
+class AgentState:
+    messages: list[dict] = field(default_factory=list)</pre><div class="callout warn"><b>面试高频：</b>为什么不能把 <code class="inline">[]</code> 直接当成所有实例共用的可变默认对象？核心就是“默认值对象是否被多个实例共享”。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>class：当“状态 + 行为”开始绑定在一起</h2><div class="sub">ResearchAgent 不只是装数据，它还会执行 run、调用 tools、更新 state。</div></div></div><pre>class ResearchAgent:
+    def __init__(self, model, tools):
+        self.model = model
+        self.tools = tools
+        self.state = AgentState()
+
+    async def run(self, question: str):
+        self.state.messages.append({"role": "user", "content": question})
+        ...</pre><table class="table"><tr><th>东西</th><th>直觉</th></tr><tr><td><code>self</code></td><td>“这个具体实例自己”</td></tr><tr><td><code>__init__</code></td><td>创建实例时把它需要的依赖装进去</td></tr><tr><td>attribute</td><td>这个对象长期保存的状态/依赖</td></tr><tr><td>method</td><td>围绕这个对象状态执行的行为</td></tr></table><div class="quiz" data-quiz><h4>什么时候更值得用 class？</h4><button class="option" data-feedback="纯函数只做一次输入→输出，class 可能反而增加样板代码。">A. 一个纯粹的 normalize_title(text) 小函数</button><button class="option" data-correct="1">B. 一个长期持有 model、tools、state，并反复 run() 的 ResearchAgent</button><button class="option" data-feedback="把每个工具都塞进一个巨型 class 通常只是制造耦合。">C. 因为 class 看起来更专业，所以所有代码都改成 class</button><div class="feedback"></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Composition：Agent “拥有工具”，不必“继承工具”</h2><div class="sub">AI 工程里更常见的是把不同能力组合起来，而不是做一棵复杂继承树。</div></div></div><div class="composition-map"><div class="agent-box">ResearchAgent<br><small>负责流程与状态</small></div><div class="link">HAS →</div><div class="deps"><div class="dep">LLMClient</div><div class="dep">SearchTool</div><div class="dep">MemoryStore</div><div class="dep">Logger</div></div></div><pre>class ResearchAgent:
+    def __init__(self, llm, search_tool, memory):
+        self.llm = llm
+        self.search_tool = search_tool
+        self.memory = memory</pre><div class="callout"><b>Composition 的好处：</b>测试时可以把真实 SearchTool 换成 FakeSearchTool；换模型供应商时替换 LLMClient；Agent 本身不用继承一堆供应商类。</div><div class="callout bad"><b>错误方向：</b><code>class ResearchAgent(OpenAIClient, SearchTool, RedisMemory, Logger)</code>。这种多重继承会把“会使用这些能力”和“本身就是这些能力”混在一起。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Pydantic Model、dataclass、普通 class 到底怎么选？</h2><div class="sub">它们不是互相替代，而是解决不同问题。</div></div></div><table class="table"><tr><th>工具</th><th>最适合</th><th>Agent 例子</th></tr><tr><td>Pydantic BaseModel</td><td>外部边界、验证、序列化</td><td>SearchRequest / API Response / Tool 参数</td></tr><tr><td>dataclass</td><td>内部结构化状态，想少写样板代码</td><td>AgentState / ToolResult</td></tr><tr><td>普通 class</td><td>长期持有依赖并提供行为</td><td>ResearchAgent / SearchService</td></tr><tr><td>普通 dict/list</td><td>局部、简单、短生命周期数据</td><td>一个函数内部临时聚合结果</td></tr></table><div class="callout warn"><b>不要追求“统一成一种”。</b>一个真实项目里同时出现 Pydantic、dataclass、class、dict 非常正常。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Research Agent v0.7：把状态、依赖、行为收拢</h2><div class="sub">现在项目第一次有了一个真正清楚的 Agent 对象。</div></div></div><pre>from dataclasses import dataclass, field
+
+@dataclass
+class AgentState:
+    messages: list[dict] = field(default_factory=list)
+    retry_count: int = 0
+    finished: bool = False
+
+class ResearchAgent:
+    def __init__(self, sources, logger):
+        self.sources = sources
+        self.logger = logger
+        self.state = AgentState()
+
+    async def run(self, question: str):
+        self.state.messages.append({"role": "user", "content": question})
+        results = await self._search_all(question)
+        self.state.finished = True
+        return results</pre><div class="exercise"><b>练习 A</b><p>设计一个 <code class="inline">ToolResult</code> dataclass：tool_name、success、content、error。</p><details><summary>参考答案</summary><pre>@dataclass
+class ToolResult:
+    tool_name: str
+    success: bool
+    content: str | None = None
+    error: str | None = None</pre></details></div><div class="exercise"><b>练习 B · 工程选择</b><p>一个 <code class="inline">parse_json(text)</code> 只输入字符串并返回 dict，没有长期状态。该不该强行写成 Parser class？</p><details><summary>参考思路</summary><p>通常没必要。纯函数更直接、更容易测试。只有当 parser 长期持有配置、缓存、schema、外部资源时，class 才更自然。</p></details></div><div class="callout interview"><b>面试验收：</b>① dataclass 与 Pydantic 的区别？② 为什么 default_factory 很重要？③ composition 为什么比复杂继承更适合 Agent？④ 什么时候 class 反而是过度设计？⑤ Agent state 为什么要避免多个会话共享同一个可变对象？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="python07">我能解释对象/状态并完成练习</label></div></section><div class="footer">下一课：Testing + Research Agent Lite v1.0 —— 用测试证明前七课不是“碰巧能跑”。</div></main></div><script src="../assets/app.js"></script><script src="../assets/lesson78.js"></script></body></html>
