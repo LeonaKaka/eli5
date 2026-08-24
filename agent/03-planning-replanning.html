@@ -1,0 +1,47 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent 03 · Planning / Replanning</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/agent12.css"><link rel="stylesheet" href="../assets/agent34.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 Agent<small>Autonomous Systems Engineering</small></div><div class="nav-label">Agent</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content">
+<section class="hero"><span class="kicker">Agent 03 · Research Assistant v3.3</span><h1>会决定“下一步”还不够。<br>长任务需要知道哪些步骤依赖哪些步骤，以及什么时候原计划已经失效。</h1><p class="lead">Agent 01/02 已经有循环和硬停止边界。现在处理更长的任务：先建立一个<b>显式 Plan</b>，执行时不断拿 Observation 检查“计划还能不能继续”。关键不是让模型写一份漂亮 todo，而是让计划拥有 step、依赖、状态、revision 和可观察的 replan 原因。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>为什么只靠“每一步现场决定”会变乱？</h2><div class="sub">局部最合理的动作，不一定服务全局目标。</div></div></div><div class="grid2"><div class="card"><b>Reactive only</b><pre>看到论文 A → 读 A
+看到引用 C → 又读 C
+看到关键词 D → 再搜 D
+...</pre><p>每一步都似乎合理，但可能一直扩散，没有完成“比较 A/B 方法”这个 objective。</p></div><div class="card"><b>Plan-guided</b><pre>1. 定义比较维度
+2. 找 A/B 方法证据
+3. 找关键结果
+4. 综合比较</pre><p>下一动作仍可动态决定，但知道当前是在服务哪个 subgoal。</p></div></div><div class="callout"><b>Plan 的价值是约束搜索空间和提供进度坐标。</b>它不是要求 Agent 从此机械执行最初方案。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>Interactive：Plan Drift Lab</h2><div class="sub">切换运行中出现的新情况，看什么时候该继续、什么时候必须 replan。</div></div></div><div class="plan-lab"><div class="scenario-tabs"><button class="btn active" data-plan-scenario="normal">正常推进</button><button class="btn" data-plan-scenario="blocked">关键论文不可访问</button><button class="btn" data-plan-scenario="invalidated">新证据推翻假设</button><button class="btn" data-plan-scenario="goal">用户改变目标</button></div><div class="plan-controls"><button class="btn" id="planExecute">执行当前可执行 Step</button><button class="btn primary" id="planReplan">按新情况 Replan</button></div><div class="plan-board"><div class="plan-list" id="planSteps"></div><div class="plan-meta"><div class="plan-meta-card"><span>revision</span><b id="planRevision">v1</b></div><div class="plan-meta-card"><span>scenario</span><b id="planScenario">—</b></div><div class="plan-meta-card"><span>progress</span><b id="planProgress">—</b></div></div></div><div class="replan-banner" id="replanBanner"></div></div><div class="callout warn"><b>重点：</b>“有新 Observation”不等于“必须 Replan”。只有计划假设失效、步骤被阻塞、目标改变或持续没有进展时，replan 才值得额外成本。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Plan 应该是结构化对象，而不是隐藏在一段自然语言里</h2><div class="sub">这样 Agent 才知道 step 是否完成、被阻塞、依赖谁。</div></div></div><pre>Plan(
+    objective="比较论文 A 和 B",
+    steps=[
+        PlanStep(id="scope", description="定义比较范围", status="completed"),
+        PlanStep(id="search", description="找方法证据", dependencies=["scope"]),
+        PlanStep(id="evidence", description="提取关键结果", dependencies=["search"]),
+        PlanStep(id="synthesize", description="综合回答", dependencies=["evidence"]),
+    ],
+    revision=1,
+)</pre><div class="callout"><b>依赖关系很重要。</b>如果 `search` 没完成，`evidence` 就不应该被当成 ready step；这比 prompt 里写“请按顺序执行”更可靠。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Planning 不是 Workflow：Plan 可以变</h2><div class="sub">固定流程和动态计划的边界要分清。</div></div></div><table class="table"><tr><th>系统</th><th>步骤</th><th>适合</th></tr><tr><td>Workflow</td><td>代码提前定义 A → B → C</td><td>流程稳定、合规要求强</td></tr><tr><td>Agent + Plan</td><td>先产生 Plan，执行中可根据 Observation 调整</td><td>开放式调查、复杂搜索、步数不确定</td></tr><tr><td>Reactive Agent</td><td>没有长期计划，只看当前状态选下一动作</td><td>简单动态任务、短 horizon</td></tr></table><div class="callout">别把所有任务都“Plan 化”。如果只有两步固定调用，普通 workflow 往往更简单。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Replan Trigger：到底什么情况值得推翻旧计划？</h2><div class="sub">v3.3 把触发条件放进应用侧 `ReplanPolicy`。</div></div></div><div class="policy-grid"><div class="policy-card"><b>Goal changed</b><p>用户明确改变 objective，旧计划不再服务新目标。</p></div><div class="policy-card"><b>Assumption invalidated</b><p>新证据证明计划依赖的关键假设错误。</p></div><div class="policy-card"><b>Step blocked</b><p>权限、数据缺失或外部依赖让当前路径走不通。</p></div><div class="policy-card"><b>No progress</b><p>连续多步没有减少未完成目标或增加有效证据。</p></div><div class="policy-card"><b>不该触发</b><p>只是来了一个正常 observation，计划仍然有效。</p></div><div class="policy-card"><b>成本</b><p>每次 replan 都要付额外模型调用、状态变化和测试复杂度。</p></div></div></section>
+<section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Plan Thrashing：Replan 太勤也会成为一种死循环</h2><div class="sub">“灵活”不等于每一步都重新规划。</div></div></div><pre>step 1 observation
+→ replan v2
+step 2 observation
+→ replan v3
+step 3 small change
+→ replan v4
+...</pre><div class="callout bad"><b>问题：</b>Agent 大量时间花在“重新描述计划”，而不是完成计划。生产系统通常需要 replan threshold、minimum progress window 或明确 trigger。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Progress 必须可计算，而不是“模型感觉快完成了”</h2><div class="sub">Agent 02 的 no-progress 到这里开始有结构。</div></div></div><div class="grid2"><div class="card"><b>Plan progress</b><p>completed steps / total steps、blocked steps、ready steps。</p></div><div class="card"><b>Task progress</b><p>新增有效 evidence、完成 subgoal 数、未解决约束是否减少。</p></div></div><div class="callout">一个动作执行成功不等于任务有进展。例如连续 5 次 search 都返回不同但无关结果，Tool 都是 `ok=True`，objective 仍然没有前进。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>保留 Plan Revision，而不是原地覆盖</h2><div class="sub">这样才能解释“为什么最终走成了现在这条路径”。</div></div></div><div class="revision-strip"><span class="revision-pill">v1 · 初始计划</span><span class="arrow">→</span><span class="revision-pill">v2 · paper A blocked</span><span class="arrow">→</span><span class="revision-pill">v3 · 用户改变目标</span></div><p>日志和 eval 应该能知道哪个 revision 产生了哪个 action。如果只保存最后一版 plan，中间为什么绕路、为什么多花 8 个 tool calls 都很难解释。</p></section>
+<section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v3.3：Plan + ReplanPolicy</h2><div class="sub">应用判断“计划是否 stale”，planner 才负责生成新 revision。</div></div></div><pre>decision = ReplanPolicy(no_progress_threshold=2).evaluate(
+    plan,
+    ProgressSignal(
+        blocked_step_ids={"search"},
+        consecutive_no_progress_steps=0,
+    ),
+)
+
+if decision.should_replan:
+    plan = revised_plan(
+        plan,
+        steps=new_steps,
+        reason=decision.reason,
+    )</pre><div class="callout"><b>真实边界：</b>`ReplanPolicy` 不负责“聪明地生成计划”，它只负责判断旧计划是否已经不值得继续。这样 trigger 可以独立测试。</div></section>
+<section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2><div class="sub">Planning 的重点不是让模型先输出 TODO。</div></div></div><div class="quiz" data-quiz><h4>Agent 每拿到一个新搜索结果就重新生成整份计划，即使原计划仍然有效。主要风险是什么？</h4><button class="option" data-feedback="计划越频繁不代表执行越可靠。">A. 计划越多一定越准确</button><button class="option" data-correct="1">B. 可能发生 plan thrashing，增加成本并让执行轨迹不断漂移</button><button class="option" data-feedback="结构化 Plan 反而更容易被测试。">C. Plan 不能有结构化字段</button><div class="feedback"></div></div><div class="callout interview"><b>面试验收：</b>① reactive agent / workflow / plan-guided agent 区别？② Plan 为什么要显式 dependencies/status？③ 哪些 Observation 应触发 replan？④ 什么是 plan thrashing？⑤ progress 怎么定义？⑥ 为什么保留 revision？⑦ planner 和 replan trigger 为什么最好分离？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="agent03">我能设计可执行、可修订、可追踪的 Plan</label></div></section>
+<div class="footer">下一课：Plan 解决“这一轮怎么走”；Memory 解决“哪些东西值得跨 run 留下来”。</div></main></div><script src="../assets/app.js"></script><script src="../assets/agent-nav.js"></script><script src="../assets/agent34.js"></script></body></html>
