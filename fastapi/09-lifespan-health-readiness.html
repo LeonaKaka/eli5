@@ -1,0 +1,50 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 09 · Lifespan / Health / Readiness</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi910.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">09 · Research Assistant v5.9</span><h1>服务“进程还活着”，<br>不代表它现在应该继续接用户流量。</h1><p class="lead">真正的 Agent API 会长期持有 DB pool、HTTP client、queue connection、checkpoint/event backend。它们必须有明确 owner、startup、shutdown；同时把 <b>liveness</b> 和 <b>readiness</b> 分开，否则一次数据库抖动就可能触发整组容器重启风暴。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>工程问题：资源到底谁创建，谁关？</h2></div></div><div class="lifecycle-track"><div class="life-step">process start</div><div class="life-step active">lifespan startup</div><div class="life-step">serve requests</div><div class="life-step">drain / shutdown</div><div class="life-step active">lifespan cleanup</div></div><pre>DB pool / queue client / shared HTTP client
+
+❌ import module 时随手创建
+❌ 每个 request 创建一次
+❌ 只创建不 close
+
+✅ lifespan startup 创建/连接
+✅ app.state / dependency 提供引用
+✅ lifespan shutdown 按 owner 关闭</pre></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>FastAPI lifespan 是资源 ownership contract</h2></div></div><pre>resources = RuntimeResourceManager(...)
+
+app = FastAPI(
+    lifespan=resources.lifespan,
+)
+
+@asynccontextmanager
+async def lifespan(app):
+    await resources.start()
+    try:
+        yield               # 服务开始接请求
+    finally:
+        await resources.close()</pre><div class="callout">重点不在 `asynccontextmanager` 语法，而在 <b>只有一个地方拥有资源生命周期</b>。Endpoint 只“借用”依赖，不负责偷偷创建/销毁全局连接。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Liveness 和 Readiness 为什么必须分开？</h2></div></div><div class="probe-row"><b>/health/live</b><span>“这个进程 / event loop 还能回答吗？”——不要因为 DB 暂时挂了就自杀重启。</span><span class="probe-pill ok">200</span></div><div class="probe-row"><b>/health/ready</b><span>“如果现在给我新流量，我能正确服务吗？”——required dependency 挂了就摘流量。</span><span class="probe-pill bad">503</span></div><div class="callout warn"><b>错误做法：</b>liveness 每次都 ping DB。DB 集群抖 20 秒 → 所有 API pod liveness 失败 → 编排器同时重启所有 pod → 故障被放大。</div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Interactive · Health Gate Lab</h2><div class="sub">启动服务，再故意把 Queue 拉闸。看 liveness 为什么仍绿、readiness 为什么变红。</div></div></div><div class="health-lab"><div class="health-controls"><button class="btn primary" id="lifeStart">lifespan startup</button><button class="btn" id="lifeQueueDown">Queue down</button><button class="btn" id="lifeQueueUp">Queue recover</button><button class="btn" id="lifeOptionalDown">Optional analytics down</button><button class="btn" id="lifeShutdown">shutdown</button><span class="http-status warn" id="healthStatus">不要接新流量</span></div><div class="health-grid"><div class="health-pane"><div class="probe-row"><b>GET /health/live</b><span>只问进程是否活着</span><span class="probe-pill bad" id="liveProbe">503</span></div><div class="probe-row"><b>GET /health/ready</b><span>required dependencies</span><span class="probe-pill bad" id="readyProbe">503</span></div><pre id="healthOut"></pre></div><div class="health-pane"><div class="resource-stack"><div class="resource-item" data-resource="run_store"><span class="status-dot"></span><b>run_store</b><span data-resource-state>ready</span></div><div class="resource-item" data-resource="job_queue"><span class="status-dot"></span><b>job_queue</b><span data-resource-state>ready</span></div><div class="resource-item" data-resource="graph_runtime"><span class="status-dot"></span><b>graph_runtime</b><span data-resource-state>ready</span></div><div class="resource-item" data-resource="event_stream"><span class="status-dot"></span><b>event_stream</b><span data-resource-state>ready</span></div><div class="resource-item optional" data-resource="analytics_sink"><span class="status-dot"></span><b>analytics_sink · optional</b><span data-resource-state>not ready</span></div></div></div></div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Optional dependency 不一定应该把整个 API 摘掉</h2></div></div><p>比如核心研究请求只依赖 RunStore + Queue + Graph checkpoint，而一个 analytics sink 只是辅助遥测。analytics 掉了：</p><pre>live  = 200
+ready = 200
+analytics = degraded</pre><p>反过来，如果 Queue 是创建 Run 的必要路径：</p><pre>live  = 200
+ready = 503
+job_queue = not ready</pre><p>Readiness 本质是一个<b>产品可服务性策略</b>，不是“所有依赖都必须 100% 正常”的机械 AND。</p></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Startup 中途失败，也要清理已经打开的资源</h2></div></div><pre>await db.start()       ✅
+await queue.start()    ✅
+await event.start()    💥
+
+不能直接退出：
+DB / Queue 连接已经打开
+
+正确：
+close(queue)
+close(db)
+raise startup error</pre><div class="callout">v5.9 的 `RuntimeResourceManager.start()` 已经把 partial-start cleanup 写成回归边界；这类 bug 本地跑一次不明显，但滚动发布/反复重启时很容易积累。</div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Health endpoint 不需要用户 Bearer token</h2></div></div><pre>GET /health/live
+GET /health/ready
+
+→ 不挂 RunReadPrincipal
+→ 给 LB / orchestrator 使用
+→ 只返回最小 operational state
+→ 不暴露 secrets / DSN / exception traceback</pre><p>它们的受众不是最终用户，但也不代表可以把数据库连接串、内部 host、checkpoint 内容塞进去。</p></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Research Assistant v5.9 新增什么？</h2></div></div><pre>app/fastapi_lifecycle.py
+├── ManagedDependency
+├── RuntimeResourceManager
+├── HealthCheck
+└── HealthResponse
+
+FastAPI(... lifespan=resources.lifespan)
+
+GET /health/live
+GET /health/ready</pre><p>测试会进入真正的 `with TestClient(app)` lifespan context，确认 startup 和 shutdown 都发生，而不是只断言一个布尔值。</p></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>常见失败模式</h2></div></div><div class="state-grid"><div class="state"><b>每 request 建 client</b><span>连接池失去意义，latency / socket 压力上升。</span></div><div class="state"><b>import time 建资源</b><span>测试、fork、reload、配置失败时 ownership 混乱。</span></div><div class="state"><b>live = ready</b><span>外部依赖抖动会触发不必要的进程重启。</span></div><div class="state"><b>ready 永远 200</b><span>明知 Queue/DB 不可用还继续吃生产流量。</span></div></div></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>数据库暂时不可用，但 FastAPI event loop 正常。更合理的探针通常是？</h4><button class="option" data-feedback="这样会让数据库故障诱发应用反复重启。">A. live=503，ready=503</button><button class="option" data-correct="1">B. live=200，ready=503</button><button class="option" data-feedback="继续接生产请求只会制造更多失败。">C. live=200，ready=200</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① lifespan 解决什么 ownership 问题？② 为什么 liveness 不该依赖 DB？③ readiness 是否必须检查所有第三方？④ startup 部分成功后失败如何 cleanup？⑤ 为什么 TestClient 要用 context manager 才能测 lifespan？⑥ health endpoint 应不应该鉴权？⑦ graceful shutdown 时什么时候先摘 readiness？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi09">我能设计 lifespan、资源 owner、liveness/readiness 和 shutdown 边界</label></div></section><div class="footer">下一课：10 Production Agent API Architecture · Research Assistant v6.0 最终收口。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi910.js"></script></body></html>
