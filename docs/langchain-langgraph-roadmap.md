@@ -4,17 +4,19 @@ Scope: migrate Research Assistant v4.0 from a hand-built Agent control plane int
 
 Current reference line: LangChain 1.3.x + LangGraph 1.2.x.
 
-## 01 — LangChain vs LangGraph / Abstraction Ladder
+Current progress: **04 / 10 live**, Research Assistant **v4.4**.
+
+## 01 — LangChain vs LangGraph / Abstraction Ladder ✅
 Understand `create_agent` versus `StateGraph`, how LangChain agents are implemented on top of LangGraph, what problems each abstraction solves, when a simple `create_agent` is enough, when a custom graph is justified, and how the existing v4.0 AgentLoop maps onto graph concepts.
 
-## 02 — StateGraph Core / State / Nodes / Edges / Reducers
+## 02 — StateGraph Core / State / Nodes / Edges / Reducers ✅
 Build a real `StateGraph`; define typed state, partial state updates, `START` / `END`, fixed edges, conditional routing and reducers. Learn why state is not conversation history and why reducers are merge semantics rather than convenience helpers.
 
-## 03 — LangChain Tools / ToolNode / Agent Loop
-Use `@tool`, `ToolNode`, tool messages and tool routing. Inspect the ReAct-style model ↔ tools loop and compare custom `StateGraph` control with LangChain `create_agent`.
+## 03 — LangChain Tools / ToolNode / Agent Loop ✅
+Use `@tool`, `ToolNode`, `ToolMessage`, `tools_condition` and tool routing. Inspect the ReAct-style model ↔ tools loop, preserve tool-call/result correlation, and compare custom `StateGraph` control with LangChain `create_agent`.
 
-## 04 — Conditional Control Flow / Command / Send
-Model branches and loops with conditional edges, use `Command` to combine state update + routing, use `Send` for dynamic fan-out/map-reduce, and connect these APIs to the ActionGraph / orchestration concepts from Agent 05.
+## 04 — Conditional Control Flow / Command / Send ✅
+Model branches and loops with conditional edges, use `Command` to combine state update + routing, use `Send` for dynamic fan-out/map-reduce, and connect these APIs to the ActionGraph / orchestration concepts from Agent 05. Reducers define fan-in semantics; dynamic fan-out does not remove concurrency/rate-limit policy.
 
 ## 05 — Persistence / Threads / Checkpointers
 Use a checkpointer, `thread_id`, state history, checkpoint inspection, replay/time-travel concepts and fault recovery. Separate thread-scoped graph state from external run-control state.
@@ -36,10 +38,10 @@ Migrate the Research Assistant runtime into a graph-backed architecture while pr
 
 ## Project evolution
 Continue `projects/research-agent-lite/` from Research Assistant v4.0:
-- v4.1 abstraction mapping + first compiled LangGraph
-- v4.2 explicit typed StateGraph + reducers + routing
-- v4.3 LangChain tools / ToolNode / create_agent comparison
-- v4.4 Command / Send / conditional orchestration
+- v4.1 abstraction mapping + first compiled LangGraph ✅
+- v4.2 explicit typed StateGraph + reducers + routing ✅
+- v4.3 LangChain tools / ToolNode / create_agent comparison ✅
+- v4.4 Command / Send / conditional orchestration ✅
 - v4.5 checkpointers / threads / persistence
 - v4.6 interrupts / human-in-the-loop resume
 - v4.7 Store / long-term memory
