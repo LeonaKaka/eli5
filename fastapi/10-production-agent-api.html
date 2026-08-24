@@ -1,0 +1,68 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FastAPI 10 · Production Agent API Architecture</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/fastapi12.css"><link rel="stylesheet" href="../assets/fastapi910.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 API<small>FastAPI Backend</small></div><div class="nav-label">Backend Track</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">10 · Research Assistant v6.0</span><h1>最后不是“一个巨大的 FastAPI 应用”。<br>而是一组边界清楚、可以替换基础设施的服务契约。</h1><p class="lead">这课把前 58 课真正接成一个后端：HTTP contract、Bearer principal、RunStore/Queue、Worker revision、LangGraph checkpoint/interrupt、Approval、SSE、Problem Details、lifespan。重点不是再加新 API，而是回答：<b>谁拥有事实？谁能重试？谁能恢复？哪些进程内 adapter 绝不能带进生产？</b></p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>最终请求路径</h2></div></div><div class="final-flow"><div class="node">Browser / Client</div><div class="node">FastAPI<br>Auth + Contract</div><div class="node">RunStore<br>Queue</div><div class="node">Worker<br>revision claim</div><div class="node">LangGraph<br>Tools / RAG</div><div class="node">Checkpoint<br>SSE / Approval</div></div><pre>POST /runs
+  ↓ 201 QUEUED
+external Queue
+  ↓
+Worker claim(expected_revision)
+  ↓
+LangGraph thread/checkpoint
+  ↓
+Tool / RAG / interrupt
+  ↓
+RunStore authoritative product status
+  ↓
+SSE client-safe projection</pre></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>三层 ownership：别让 LangGraph 或 FastAPI“包办一切”</h2></div></div><div class="ownership-matrix"><div class="head">责任</div><div class="head">FastAPI / App</div><div class="head">LangGraph</div><div class="head">Infrastructure</div><div>HTTP contract / auth / tenant</div><div class="yes">主责</div><div>—</div><div class="partial">proxy/identity provider</div><div>graph state / interrupt / checkpoint semantics</div><div class="partial">授权 resume</div><div class="yes">主责</div><div class="partial">durable checkpoint backend</div><div>Run status / revision / cancel</div><div class="yes">主责</div><div>—</div><div class="partial">durable DB</div><div>job delivery / worker lease</div><div class="partial">enqueue command</div><div>—</div><div class="yes">主责</div><div>external side-effect idempotency</div><div class="yes">policy / key</div><div class="partial">tool call flow</div><div class="yes">target service durability</div></div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>哪些东西是“产品事实”？</h2></div></div><div class="architecture-stack"><div class="architecture-layer"><b>RunStore</b>tenant、Run status、revision、cancel、approval request、checkpoint reference。客户端看到的产品状态以这里为准。</div><div class="architecture-layer"><b>LangGraph checkpointer</b>Graph StateSnapshot、next node、interrupt continuation。它知道“图执行到哪”，但不是用户权限数据库。</div><div class="architecture-layer"><b>Queue / Worker</b>负责至少一次 delivery、claim、lease、重试调度。Queue message 不是 Run 本身。</div><div class="architecture-layer"><b>Event log / SSE</b>是客户端投影和增量通知，不是 authoritative Run state。丢 retention 后应重新 GET Run。</div></div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Interactive · Deployment Profile Gate</h2><div class="sub">课程项目为了无外部服务能运行，仍有多个 in-memory adapter。切到 production 看为什么 v6.0 会拒绝“假装上线”。</div></div></div><div class="deploy-lab"><div class="deploy-controls"><select class="profile-switch" id="deployProfile"><option value="teaching">teaching profile</option><option value="production">production profile</option></select><span class="http-status ok" id="deployStatus">TEACHING ACCEPTED</span></div><div class="deploy-grid"><div class="deploy-pane"><pre id="deployOut"></pre></div><div class="deploy-pane"><div class="audit-list" id="auditList"></div></div></div></div></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Docker 能启动 ≠ Production Ready</h2></div></div><pre>docker run research-assistant
+
+如果里面仍然是：
+InMemoryRunStore
+InMemoryRunQueue
+InMemorySaver
+InMemoryRunEventStore
+InMemoryIdempotencyStore
+DemoTokenAuthenticator
+
+→ 单副本重启就丢事实
+→ 两个副本之间互相看不到状态
+→ approval / retry / SSE 语义失真
+→ 不能因为“容器跑起来了”就叫生产</pre><div class="callout bad"><b>v6.0 的 production profile gate 会直接拒绝这一组合。</b>Docker 主线下一步的任务，就是逐个替换这些 process-local adapter。</div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>v6.0 composition root</h2></div></div><pre>components = ServiceComponents(
+  bridge=...,
+  events=...,
+  idempotency=...,
+  authenticator=...,
+  resources=...,
+)
+
+app = build_service(
+  profile=DeploymentProfile.TEACHING,
+  components=components,
+)</pre><p>真正部署时仍然走同一个 composition root，但把 adapter 替换掉。Route 不应该知道你底层是 Postgres、Redis、SQS 还是别的实现。</p></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>一条 Approval 最终怎么穿过系统？</h2></div></div><pre>Graph interrupt
+  ↓ checkpoint cp-17
+RunStore WAITING_APPROVAL r7
+  ↓
+SSE approval_required
+  ↓
+POST approval
+Bearer permission + exact request id
+If-Match: "7"
+Idempotency-Key: approve-...
+  ↓
+RunStore QUEUED r8 + RESUME job
+  ↓
+Worker claim r8
+  ↓
+Command(resume=True)
+  ↓
+Graph continues from durable checkpoint</pre><p>注意每一层都只承担自己的证明：Bearer 证明 identity/permission，If-Match 证明客户端状态没过期，Idempotency-Key 证明同一逻辑 command 不重复执行，checkpoint 证明 Graph 能继续。</p></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>故障发生时，先问“哪一层拥有恢复权”</h2></div></div><div class="state-grid"><div class="state"><b>HTTP retry</b><span>Idempotency store + ETag 决定 command 是否 replay。</span></div><div class="state"><b>Queue duplicate</b><span>Run revision/CAS 拒绝 stale delivery。</span></div><div class="state"><b>Worker crash</b><span>lease/watchdog + checkpoint + requeue。</span></div><div class="state"><b>Tool timeout</b><span>ReplaySafety / downstream idempotency / reconcile。</span></div><div class="state"><b>SSE disconnect</b><span>Last-Event-ID；retention gap 时 GET Run 重建事实。</span></div><div class="state"><b>Dependency outage</b><span>readiness 503 摘流量，liveness 通常保持 200。</span></div></div></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>Research Assistant v6.0 后端结构</h2></div></div><pre>FastAPI
+├── fastapi_app.py
+│   ├── Run API
+│   ├── SSE
+│   ├── Approval / Cancel
+│   └── /health/live + /health/ready
+├── fastapi_security.py
+├── fastapi_commands.py
+├── fastapi_errors.py
+├── fastapi_lifecycle.py
+├── fastapi_service.py        ← v6.0 composition / deployment audit
+├── fastapi_worker.py
+├── fastapi_streaming.py
+├── production.py             ← RunStore / Queue / revision contract
+└── langgraph_production.py   ← checkpoint / interrupt bridge</pre><div class="boundary-card"><b>v6.0 完成的是架构和接口闭环，不是基础设施闭环。</b>当前 teaching profile 仍故意可离线运行；production profile 反而会拒绝这些内存 adapter，逼着下一条 Docker/部署线把它们外置。</div></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>FastAPI 10/10 · 面试验收</h2></div></div><div class="quiz" data-quiz><h4>用了 LangGraph durable checkpoint 后，API 的 RunStore 可以删掉吗？</h4><button class="option" data-feedback="Graph checkpoint 不负责 tenant、HTTP resource、cancel/revision 等产品状态。">A. 可以，checkpoint 已经包含所有状态</button><button class="option" data-correct="1">B. 不可以；Graph execution state 和产品 Run/control-plane state 是不同 ownership</button><button class="option" data-feedback="Queue 也不等于产品事实数据库。">C. 改成只用 Queue 就够了</button><div class="feedback"></div></div><div class="callout interview"><b>面试追问：</b>① FastAPI / LangGraph / Queue 各自拥有哪类状态？② 为什么 SSE event 不能当 authoritative state？③ Queue 至少一次投递如何防重复？④ approval 为什么同时需要 auth、request id、If-Match、idempotency？⑤ process-local idempotency 为什么不能多副本？⑥ health/live 与 ready 如何配合滚动发布？⑦ Docker 化后最先应该外置什么？⑧ “可运行”和“可生产”之间缺哪些基础设施？</div><div class="done-row"><label class="done"><input type="checkbox" data-progress="fastapi10">我能从 HTTP 请求一路解释到 durable Worker / Graph / checkpoint / SSE，并指出哪些 adapter 必须外置</label></div></section><div class="footer">FastAPI 10/10 完成 · Research Assistant v6.0。下一条核心能力：Docker / 容器化与多服务部署。</div></main></div><script src="../assets/app.js"></script><script src="../assets/fastapi-nav.js"></script><script src="../assets/fastapi910.js"></script></body></html>
