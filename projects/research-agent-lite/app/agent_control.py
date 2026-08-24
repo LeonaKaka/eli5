@@ -8,9 +8,12 @@ from pydantic import BaseModel, Field
 class RunStatus(StrEnum):
     RUNNING = "running"
     WAITING_TOOL = "waiting_tool"
+    WAITING_APPROVAL = "waiting_approval"
+    PAUSED = "paused"
     COMPLETED = "completed"
     STOPPED = "stopped"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class StopReason(StrEnum):
