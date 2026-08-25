@@ -11,29 +11,27 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 - **LangChain / LangGraph — 10/10**: StateGraph → ToolNode → Command/Send → persistence → interrupt → Store → subgraphs → middleware/streaming → production runtime boundaries.
 - **FastAPI — 10/10**: Run API → contracts → async/Worker → SSE → idempotent commands → auth/security → errors → testing → lifespan/health → production API architecture.
 
-Roadmaps: `docs/llm-app-roadmap.md`, `docs/rag-roadmap.md`, `docs/agent-roadmap.md`, `docs/langchain-langgraph-roadmap.md`, `docs/fastapi-roadmap.md`.
+The core line contains 58 lessons. Roadmaps remain under `docs/`.
 
-## Advanced track — MCP / Tool Ecosystem — 2/10 live
+## Advanced Agent Engineering — 2/6 live
 
-- 01 Host / Client / Server / Tools / Resources / Prompts / control ownership ✅
-- 02 Python SDK v2 `MCPServer` + first-class `Client` / real discovery/call/read/get ✅
-- 03 stdio / Streamable HTTP / 2026 stateless MCP
-- 04 tool contracts / structured results / errors / progress
-- 05 resources / templates / cache / subscriptions
-- 06 prompts / completions / user workflows
-- 07 multi-server discovery / namespacing / routing
-- 08 OAuth / authorization / trust
-- 09 MCP ↔ LangGraph / gateway / observability
-- 10 production MCP ecosystem / Tasks / extensions
+Advanced material is deliberately compressed into six high-density chapters. Details that can be looked up in framework docs do not become separate lessons.
 
-Full scope: `docs/mcp-roadmap.md`.
+- **A1 MCP / External Capability Ecosystem ✅** — the existing two MCP pages form one chapter: Host/Client/Server, Tool/Resource/Prompt control ownership, real Python SDK v2 `MCPServer` + `Client`. Transport/OAuth/protocol minutiae are introduced only when later work needs them.
+- **A2 Browser / Shell / Python / Filesystem Runtime ✅** — run-scoped workspace, real-browser adapter boundary, constrained shell, separate Python process, artifact registry, and one complete browser → source → generated code → artifact flow.
+- **A3 Agent Security / Prompt Injection** — attack A2 with untrusted browser/RAG/file content, secret access, path/network escape and capability abuse.
+- **A4 Production Eval / Observability** — diagnose quality drops across model/retrieval/tool/runtime traces, regression sets and failure clusters.
+- **A5 Distributed / Long-running Agent Runtime** — leases, heartbeat, duplicate delivery, stale workers, backpressure, recovery and side-effect idempotency.
+- **A6 Agent System Design Capstone** — design and defend a long-running multi-tenant Deep Research Agent architecture.
+
+Full scope: `docs/advanced-agent-roadmap.md`. The old `docs/mcp-roadmap.md` now records A1 as complete rather than a 10-lesson subtrack.
 
 ## Teaching contract
-Every lesson begins with a concrete engineering problem and includes visual/explorable mechanism, code evolution, deliberate failure cases, one continuous Research Assistant project increment, and interview-level checks.
+Every chapter begins with a concrete engineering problem and includes an explorable mechanism, runnable project increment, deliberate failure cases and interview/system-design checks.
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent at v4.0, LangGraph at v5.0, FastAPI at v6.0, and MCP now evolves it at **Research Assistant v6.2**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent at v4.0, LangGraph at v5.0, FastAPI at v6.0, A1 MCP at v6.2, and A2 Tool Runtime now brings it to **Research Assistant v6.3**.
 
 ```bash
 cd projects/research-agent-lite
@@ -44,22 +42,14 @@ pytest -q
 uvicorn app.fastapi_app:app --reload
 ```
 
-Current framework lines include `langchain>=1.3,<2`, `langgraph>=1.2,<2`, `fastapi[standard]>=0.141,<1`, and current MCP Python SDK v2 `mcp>=2,<3`.
+Optional real-browser adapter:
 
-## What comes after MCP
-
-Docker is no longer treated as a standalone teaching track; containerization will appear when a later exercise actually needs deployment/isolation. The advanced main line is:
-
-```text
-MCP / Tool Ecosystem
-→ Browser / Shell / Code Sandbox Agent
-→ Agent Security / Prompt Injection
-→ Production Eval / Observability
-→ Distributed / Long-running Agent Runtime
-→ Agent System Design / Capstone
+```bash
+pip install -e ".[browser]"
+playwright install chromium
 ```
 
-Optional specialist topics can follow: self-hosted model inference, Kubernetes/cloud, GraphRAG/knowledge graphs, realtime/voice, computer-use GUI agents, CI/CD and deeper observability stacks.
+Docker, Postgres, Redis, browser runtimes and observability stacks are used when later chapters need them; they are not standalone syllabus tracks.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. The static learning UI requires no backend or secret.
