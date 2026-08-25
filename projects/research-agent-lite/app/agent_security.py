@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Mapping
 from urllib.parse import urlparse
 
 
@@ -49,6 +51,7 @@ class RunAuthority:
 
     allowed_capabilities: frozenset[Capability]
     allowed_egress_hosts: frozenset[str] = frozenset()
+    approver_ids: frozenset[str] = frozenset()
     tainted_requires_approval: frozenset[Capability] = frozenset(
         {
             Capability.RUN_PYTHON,
@@ -62,15 +65,33 @@ class RunAuthority:
 class ToolIntent:
     capability: Capability
     target: str
-    arguments: dict[str, object]
+    arguments: Mapping[str, object]
     context: tuple[ContextChunk, ...] = ()
+    _canonical_arguments: str = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Snapshot model-proposed arguments at intent creation time. The policy and
+        # eventual executor should use `materialize_arguments()` so a caller cannot
+        # obtain approval and then mutate the original dict before execution.
+        canonical = json.dumps(
+            dict(self.arguments),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        snapshot = json.loads(canonical)
+        object.__setattr__(self, "arguments", MappingProxyType(snapshot))
+        object.__setattr__(self, "_canonical_arguments", canonical)
+
+    def materialize_arguments(self) -> dict[str, object]:
+        return json.loads(self._canonical_arguments)
 
     def fingerprint(self) -> str:
         canonical = json.dumps(
             {
                 "capability": self.capability.value,
                 "target": self.target,
-                "arguments": self.arguments,
+                "arguments": json.loads(self._canonical_arguments),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -85,7 +106,7 @@ class ToolIntent:
 
 @dataclass(frozen=True)
 class ApprovalGrant:
-    """Approval is bound to one exact intent fingerprint, never a generic unlock."""
+    """Approval is bound to one exact intent and one authorized actor."""
 
     intent_fingerprint: str
     actor_id: str
@@ -156,6 +177,12 @@ class AgentSecurityPolicy:
                 return PolicyResult(
                     SecurityDecision.APPROVAL_REQUIRED,
                     "sensitive action was proposed from external untrusted context",
+                    fingerprint,
+                )
+            if approval.actor_id not in authority.approver_ids:
+                return PolicyResult(
+                    SecurityDecision.DENY,
+                    "approval actor is not authorized for this run",
                     fingerprint,
                 )
             if not approval.approved:
