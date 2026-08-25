@@ -2,7 +2,7 @@
 
 Scope: six high-density chapters after the core Python → LLM → RAG → Agent → LangGraph → FastAPI line. Advanced chapters are system-oriented, not framework-documentation walkthroughs. Docker, Postgres, Redis, browser runtimes and observability stacks appear only when the engineering problem requires them.
 
-Current progress: **A4 / A6 live**, Research Assistant **v6.5**.
+Current progress: **A5 / A6 live**, Research Assistant **v6.6**.
 
 ## A1 — MCP / External Capability Ecosystem ✅
 Use the existing two MCP pages as one advanced chapter: Host/Client/Server boundaries, Tools vs Resources vs Prompts, control ownership, a real Python SDK v2 `MCPServer`, and a real Client that discovers/calls/reads/renders capabilities. Stop at the architectural boundary: MCP standardizes capability interoperability; the Host still owns authorization, approval, state and side-effect safety. Transport minutiae and protocol-field archaeology are lookup material, not a standalone course.
@@ -16,8 +16,8 @@ Attack the A2 runtime with indirect prompt injection from browser/RAG/file conte
 ## A4 — Production Eval / Observability ✅
 Start from the operational failure “success fell from 92% to 78%.” Model one Run as layered spans across agent/model/retrieval/tool/runtime/retry/handoff, then aggregate batches into success/latency/cost/token metrics, per-layer Run failure rates and normalized failure clusters. Compare a baseline with current traffic to identify the layer that regressed rather than guessing from final answers. Keep operational telemetry separate from quality eval: all spans may be green while evidence/answer quality falls. Use golden regression before release plus sampled online eval after rollout, and treat raw prompts/completions/tool payloads as opt-in sensitive telemetry rather than default traces.
 
-## A5 — Distributed / Long-running Agent Runtime
-Scale the existing durable concepts into a real multi-worker topology. Cover at-least-once delivery, worker lease/heartbeat, stale workers, retries, backpressure, rate limits, checkpoint recovery, idempotent external effects and graceful drain. Use Postgres/Redis/Docker only as implementation tools when needed; do not turn them into separate syllabus tracks.
+## A5 — Distributed / Long-running Agent Runtime ✅
+Turn the earlier queue/checkpoint/revision ideas into a real multi-worker ownership model. Queue delivery is explicitly at-least-once; `claim()` creates a time-bounded lease and monotonically increasing fencing token. Heartbeats extend a live lease, a watchdog reaps expired owners and requeues from the latest checkpoint, and stale workers cannot complete or mutate shared state after takeover. Add per-tenant/global admission control, graceful worker drain, and a teaching downstream ledger that combines fencing with idempotency-key replay. Keep the important caveat: external APIs that do not support fencing still need replay-safe contracts or reconciliation rather than blind retries.
 
 ## A6 — Agent System Design Capstone
 No new framework. Design a Deep Research Agent for roughly 1000 concurrent users and tasks lasting up to hours, with browser/Python/files, approvals, tenant isolation, restart recovery and cost control. Defend every ownership boundary: API vs RunStore vs Queue vs Worker vs LangGraph vs sandbox vs MCP vs event stream vs observability. Finish with failure drills and interview-style architecture review.
@@ -27,7 +27,7 @@ No new framework. Design a Deep Research Agent for roughly 1000 concurrent users
 - v6.3 — A2 real-world tool runtime / workspace / artifacts ✅
 - v6.4 — A3 security and untrusted-content boundaries ✅
 - v6.5 — A4 production eval / observability ✅
-- v6.6 — A5 distributed long-running runtime
+- v6.6 — A5 distributed long-running runtime ✅
 - v7.0 — A6 final system-design capstone
 
 ## Teaching rule
