@@ -77,4 +77,25 @@
     approval.addEventListener('change',render);
     render();
   }
+
+  const incident=q('#incidentType');
+  if(incident){
+    const metrics=q('#incidentMetrics'), trace=q('#incidentTrace'), diagnosis=q('#incidentDiagnosis'), status=q('#incidentStatus');
+    const cases={
+      tool:{status:'DEGRADED · Tool layer',metrics:[['Success','92% → 78%','bad'],['Latency','530 → 710 ms','warn'],['Cost','$0.012 → $0.012','ok'],['Quality','.88 → .77','warn']],trace:[['invoke_agent','ok'],['retrieve','ok'],['chat','ok'],['execute_tool · search_papers','bad']],diagnosis:'Top cluster: tool:search_timeout (22 runs)\nTool failure delta: +14 percentage points\n\n修法方向：search backend / timeout / retry budget\n不是：先改 system prompt。'},
+      retrieval:{status:'DEGRADED · Quality / retrieval',metrics:[['Success','92% → 81%','bad'],['Latency','530 → 525 ms','ok'],['HTTP errors','stable','ok'],['Evidence score','.91 → .68','bad']],trace:[['invoke_agent','ok'],['retrieve · 200 but weak evidence','warn'],['chat','ok'],['execute_tool','ok']],diagnosis:'Operational spans mostly green.\nQuality eval says evidence coverage collapsed.\n\n修法方向：retrieval corpus / query / rerank / citation eval\n只看 HTTP error rate 会漏掉。'},
+      model:{status:'DEGRADED · Cost',metrics:[['Success','92% → 90%','ok'],['Latency','530 → 610 ms','warn'],['Cost','$0.012 → $0.026','bad'],['Quality','.88 → .89','ok']],trace:[['invoke_agent','ok'],['retrieve','ok'],['chat · token usage spike','warn'],['execute_tool','ok']],diagnosis:'User quality没有明显退化，但单位 Run 成本翻倍。\n\n修法方向：context growth / routing / model choice / loop count。\nProduction gate 不应只看 accuracy。'},
+      worker:{status:'DEGRADED · Runtime',metrics:[['Success','92% → 91%','ok'],['Queue wait','80 → 1350 ms','bad'],['Model latency','stable','ok'],['Quality','.88 → .88','ok']],trace:[['queue_wait','bad'],['invoke_agent','ok'],['retrieve','ok'],['chat','ok']],diagnosis:'Agent 本身没变差，真正问题在 runtime queue。\n\n修法方向：worker capacity / lease / backpressure / admission control。\n这会在 A5 继续做。'}
+    };
+    const render=()=>{
+      const c=cases[incident.value];
+      status.textContent=c.status;
+      status.className='http-status '+(c.status.includes('DEGRADED')?'warn':'ok');
+      metrics.innerHTML=c.metrics.map(([name,value,cls])=>`<div class="metric-card ${cls}"><b>${name}</b><span>${value}</span></div>`).join('');
+      trace.innerHTML=c.trace.map(([name,cls],i)=>`<div class="trace-mini-row ${cls}"><span>${i+1}</span><b>${name}</b></div>`).join('');
+      diagnosis.textContent=c.diagnosis;
+    };
+    incident.addEventListener('change',render);
+    render();
+  }
 })();
