@@ -1,0 +1,42 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A2 · Browser / Shell / Python / Filesystem</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/advanced.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 ADV<small>Advanced Agent Engineering</small></div><div class="nav-label">6 High-density Chapters</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">A2 · Research Assistant v6.3</span><h1>Agent 会发 tool call，<br>离“真的能干活”还差一个 Tool Runtime。</h1><p class="lead">工程问题：用户说“查资料，分析数据，给我结果文件”。真正的 Agent 必须把网页内容、文件、生成代码、进程和最终 artifact 放进一个可控运行环境。这里做一条完整的 <b>Browser → Workspace → Python → Artifact</b> 闭环。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>Tool call 只是意图，不是运行环境</h2></div></div><div class="flow"><div class="node">LLM<br>“call python”</div><span class="arrow">→</span><div class="node">Tool Runtime</div><span class="arrow">→</span><div class="node">workspace / policy / process</div><span class="arrow">→</span><div class="node">artifact / observation</div></div><p>如果中间没有 Runtime，你最终往往会写成：模型给一段 Python → 主进程直接 `exec()`。这同时丢掉了 cwd、文件生命周期、timeout、环境变量、artifact 归属和安全边界。</p></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>一个 Run，一个 workspace</h2></div></div><pre>run-42/
+├── inputs/       # 浏览器/上传文件/外部数据的落盘副本
+├── work/         # Agent 生成的中间代码与临时文件
+└── artifacts/    # 最终要交给用户/后续步骤的产物</pre><p>模型不直接拿主机任意路径。公开 filesystem tool 先通过 `AgentWorkspace.resolve()`，拒绝 absolute path 和 `../` escape；写入只允许固定根目录。</p><div class="callout"><b>Artifact 和 prompt 不是一回事。</b>一个 50 MB CSV 或 PNG 不应该为了“给 Agent 看见”直接塞进 context。Runtime 可以只把 artifact metadata / path /摘要交回模型，真正文件继续留在 workspace。</div></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive · Runtime Boundary Lab</h2><div class="sub">切换 Browser / Filesystem / Shell / Python，看每一层到底挡什么、又挡不住什么。</div></div></div><div class="runtime-lab"><div class="runtime-panel"><div class="tool-row"><button class="tool-btn" data-tool="browser">Browser</button><button class="tool-btn" data-tool="filesystem">Filesystem</button><button class="tool-btn" data-tool="shell">Shell</button><button class="tool-btn" data-tool="python">Python</button></div><h3 id="runtimeTitle"></h3><div class="boundary-list" id="runtimeRows"></div></div><div class="runtime-panel"><b>这层的真实含义</b><pre id="runtimeOut"></pre></div></div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Browser：先限制“去哪”，再讨论“网页说了什么”</h2></div></div><pre>BrowserPolicy(
+  allowed_schemes={"http", "https"},
+  allowed_hosts={"papers.example.test"},
+)
+
+await browser.read(url)</pre><p>真实 adapter 使用 Playwright；课程测试用 fixture browser，这样 CI 不依赖公网或 Chromium。Runtime 先做 URL scope，再把页面 title/body 保存到 `inputs/source.json`。下一章会进一步讨论：即便 URL 合法，页面文本本身也仍是不可信输入。</p></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>Shell：argv + shell=False，只是第一道门</h2></div></div><div class="sandbox-split"><div class="sandbox-box good"><b>较好的工程 guardrail</b><pre>run([
+  "wc", "-w", "inputs/data.txt"
+])
+
+cwd = workspace
+shell = False
+env = minimal
+timeout = 5s</pre></div><div class="sandbox-box bad"><b>不要这样</b><pre>cmd = model_output
+subprocess.run(
+  cmd,
+  shell=True,
+)
+
+# 模型输出直接获得 shell 语法权力</pre></div></div><p>课程版还用 command allowlist，并拒绝 absolute / `..` path argument。但这仍然不是安全沙箱：一个本来就很强的允许命令，或者一个可执行程序里的漏洞，都可能突破应用层规则。</p></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>Python：独立进程 ≠ 安全沙箱</h2></div></div><pre>python -I work/generated.py
+
+cwd = run workspace
+env = {PATH, PYTHONIOENCODING}
+timeout = 8s
+stdout/stderr bounded</pre><p>把生成代码放到独立 interpreter 里很有价值：它不会污染 FastAPI/Worker 主进程的 Python state，也有明确 timeout、stdout/stderr 和 artifact 文件。但同一个 OS 用户启动的 Python，理论上仍可以读取主机文件、访问网络、fork 进程。</p><div class="callout bad"><b>所以课程源码里直接写着：not a security sandbox。</b>真正的安全边界要进一步限制 filesystem mount、network egress、process capability、CPU/RAM/time，并假设代码可能是恶意的。这正是 A3。</div></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Interactive · 跑一遍完整 Research Artifact Flow</h2></div></div><div class="task-flow"><div class="task-step" data-task-step="1"><b>1 Browser</b><p>抓页面</p></div><div class="task-step" data-task-step="2"><b>2 Save</b><p>inputs/source.json</p></div><div class="task-step" data-task-step="3"><b>3 Generate</b><p>work/*.py</p></div><div class="task-step" data-task-step="4"><b>4 Execute</b><p>separate Python</p></div><div class="task-step" data-task-step="5"><b>5 Artifact</b><p>summary.json</p></div></div><p><button class="btn primary" id="runWorkflow">运行这条任务链</button></p><div class="runtime-lab"><div><b>Workspace</b><div class="workspace-tree" id="workspaceTree">run-42/
+  inputs/
+  work/
+  artifacts/</div></div><div><b>Runtime log</b><pre id="workflowLog">点击按钮开始。</pre></div></div></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>v6.3 真实代码结构</h2></div></div><pre>AgentToolRuntime
+├── browser: BrowserAdapter
+├── workspace: AgentWorkspace
+├── shell: ShellRunner
+├── python: PythonRunner
+└── artifacts: ArtifactRegistry
+
+run_research_artifact_demo()
+  Browser.read(url)
+  → inputs/source.json
+  → generate summarize_source.py
+  → PythonRunner
+  → artifacts/summary.json</pre><p>这里最重要的不是这些 class 名，而是 ownership：Run 拥有 workspace；Runtime 拥有工具 policy；模型只提出调用；artifact 是显式产物；主 API 进程不应该随便执行模型代码。</p></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>故意失败：为什么这些 guardrail 还不够？</h2></div></div><div class="sandbox-split"><div class="sandbox-box"><b>已经防住</b><p>公开文件 API 的 `../`、absolute path；未允许 shell command；shell=True；无 timeout；整个 host env 自动继承。</p></div><div class="sandbox-box bad"><b>仍未根治</b><p>Python 自己调用 `open('/etc/...')`；网络 exfiltration；fork bomb；内核/浏览器漏洞；网页里的 indirect prompt injection；合法工具被模型以错误目的调用。</p></div></div><p>这就是为什么下一章不是继续加更多 Tool API，而是直接做 Agent Security。</p></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试验收</h2></div></div><div class="quiz" data-quiz><h4>把模型生成 Python 放进 `subprocess.run(..., timeout=8)` 后，能否称为安全沙箱？</h4><button class="option" data-feedback="进程隔离减少耦合，但同用户进程仍可能访问主机 filesystem/network。">A. 可以，已经是独立 process</button><button class="option" data-feedback="-I 主要影响 Python import/environment isolation，不是 OS 权限隔离。">B. 可以，只要加 `python -I`</button><button class="option" data-correct="1">C. 不可以。它是有价值的 runtime guardrail，但安全沙箱还需要 OS/container/VM 级 filesystem/network/process/resource controls</button><div class="feedback"></div></div><div class="callout interview"><b>能讲清这几题：</b>① 为什么 tool call 和 tool runtime 是两层？② workspace 和 artifact registry 分别解决什么？③ 为什么 `shell=False` 重要但不充分？④ 为什么 Python subprocess 仍不是安全 sandbox？⑤ Browser URL allowlist 和网页内容可信度为什么是两回事？⑥ 为什么大 artifact 不应该直接塞 context？⑦ API process 与 code-execution worker 为什么最好分开？</div></section><div class="footer">A2 完成 · Research Assistant v6.3。下一章 A3：直接攻击这套 Runtime，做 Prompt Injection / Secret / Filesystem / Network / Tool Authority。</div></main></div><script src="../assets/app.js"></script><script src="../assets/advanced-nav.js"></script><script src="../assets/advanced.js"></script></body></html>
