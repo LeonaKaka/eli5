@@ -13,25 +13,25 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 
 The core line contains 58 lessons. Roadmaps remain under `docs/`.
 
-## Advanced Agent Engineering — 2/6 live
+## Advanced Agent Engineering — 3/6 live
 
 Advanced material is deliberately compressed into six high-density chapters. Details that can be looked up in framework docs do not become separate lessons.
 
-- **A1 MCP / External Capability Ecosystem ✅** — the existing two MCP pages form one chapter: Host/Client/Server, Tool/Resource/Prompt control ownership, real Python SDK v2 `MCPServer` + `Client`. Transport/OAuth/protocol minutiae are introduced only when later work needs them.
-- **A2 Browser / Shell / Python / Filesystem Runtime ✅** — run-scoped workspace, real-browser adapter boundary, constrained shell, separate Python process, artifact registry, and one complete browser → source → generated code → artifact flow.
-- **A3 Agent Security / Prompt Injection** — attack A2 with untrusted browser/RAG/file content, secret access, path/network escape and capability abuse.
+- **A1 MCP / External Capability Ecosystem ✅** — Host/Client/Server, Tool/Resource/Prompt control ownership, real Python SDK v2 `MCPServer` + `Client`. Transport/OAuth/protocol minutiae are lookup material.
+- **A2 Browser / Shell / Python / Filesystem Runtime ✅** — run-scoped workspace, real-browser adapter boundary, constrained shell, separate Python process, artifact registry, complete browser → source → generated code → artifact flow.
+- **A3 Agent Security / Prompt Injection ✅** — trust vs authority, indirect prompt injection, secret isolation, fetch/send capability separation, network egress scope, exact-action approval and adversarial regression tests.
 - **A4 Production Eval / Observability** — diagnose quality drops across model/retrieval/tool/runtime traces, regression sets and failure clusters.
 - **A5 Distributed / Long-running Agent Runtime** — leases, heartbeat, duplicate delivery, stale workers, backpressure, recovery and side-effect idempotency.
 - **A6 Agent System Design Capstone** — design and defend a long-running multi-tenant Deep Research Agent architecture.
 
-Full scope: `docs/advanced-agent-roadmap.md`. The old `docs/mcp-roadmap.md` now records A1 as complete rather than a 10-lesson subtrack.
+Full scope: `docs/advanced-agent-roadmap.md`.
 
 ## Teaching contract
 Every chapter begins with a concrete engineering problem and includes an explorable mechanism, runnable project increment, deliberate failure cases and interview/system-design checks.
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent at v4.0, LangGraph at v5.0, FastAPI at v6.0, A1 MCP at v6.2, and A2 Tool Runtime now brings it to **Research Assistant v6.3**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent at v4.0, LangGraph at v5.0, FastAPI at v6.0, A1 MCP at v6.2, A2 Tool Runtime at v6.3, and A3 Agent Security now brings it to **Research Assistant v6.4**.
 
 ```bash
 cd projects/research-agent-lite
