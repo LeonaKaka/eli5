@@ -34,6 +34,7 @@ def default_authority() -> RunAuthority:
             }
         ),
         allowed_egress_hosts=frozenset({"papers.example.test", "api.example.test"}),
+        approver_ids=frozenset({"user-42"}),
     )
 
 
@@ -102,9 +103,37 @@ def test_v64_tainted_python_or_shell_action_requires_exact_human_approval() -> N
     assert wrong.decision is SecurityDecision.DENY
     assert "different action fingerprint" in wrong.reason
 
+    unauthorized_actor = ApprovalGrant(
+        intent_fingerprint=intent.fingerprint(),
+        actor_id="attacker",
+    )
+    unauthorized = policy.evaluate(intent, authority=authority, approval=unauthorized_actor)
+    assert unauthorized.decision is SecurityDecision.DENY
+    assert "not authorized" in unauthorized.reason
+
     exact_approval = ApprovalGrant(intent_fingerprint=intent.fingerprint(), actor_id="user-42")
     allowed = policy.evaluate(intent, authority=authority, approval=exact_approval)
     assert allowed.decision is SecurityDecision.ALLOW
+
+
+def test_v64_intent_snapshots_arguments_before_approval_to_prevent_post_approval_mutation() -> None:
+    original = {"purpose": "summarize downloaded research data", "limits": [1, 2]}
+    intent = ToolIntent(
+        capability=Capability.RUN_PYTHON,
+        target="work/analyze.py",
+        arguments=original,
+        context=(MALICIOUS_PAGE,),
+    )
+    fingerprint = intent.fingerprint()
+
+    original["purpose"] = "different action after approval"
+    original["limits"].append(999)
+
+    assert intent.fingerprint() == fingerprint
+    assert intent.materialize_arguments() == {
+        "purpose": "summarize downloaded research data",
+        "limits": [1, 2],
+    }
 
 
 def test_v64_trusted_application_work_does_not_need_prompt_injection_approval_gate() -> None:
