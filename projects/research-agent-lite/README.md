@@ -1,4 +1,4 @@
-# Research Assistant v6.4
+# Research Assistant v6.5
 
 This is the runnable project that grows across the ELI5 AI Agent Engineering course.
 
@@ -6,9 +6,10 @@ Python closed at **v1.0**, LLM Application Engineering at **v2.0**, RAG at **v3.
 
 ## Advanced increments
 
-- **v6.1–v6.2 / A1 MCP** — capability interoperability: Host/Client/Server, Tool/Resource/Prompt control ownership, real Python SDK v2 `MCPServer` + `Client` discovery/call/read/get. A1 stops here; MCP protocol minutiae are lookup material rather than ten more lessons.
-- **v6.3 / A2 Tool Runtime** — run-scoped workspace, browser adapter, constrained shell runner, separate Python interpreter process and artifact registry. The teaching flow is browser → saved source → generated Python → artifact.
-- **v6.4 / A3 Agent Security** — external-content trust labels, authenticated RunAuthority, separate read/send network capabilities, secret isolation, exact-action approval and host-side decisions that prevent prompt text from silently granting privilege.
+- **v6.1–v6.2 / A1 MCP** — capability interoperability: Host/Client/Server, Tool/Resource/Prompt control ownership, real Python SDK v2 `MCPServer` + `Client` discovery/call/read/get.
+- **v6.3 / A2 Tool Runtime** — run-scoped workspace, browser adapter, constrained shell runner, separate Python interpreter process and artifact registry.
+- **v6.4 / A3 Agent Security** — external-content trust labels, authenticated RunAuthority, fetch/send capability separation, secret isolation, egress scope and exact-action approval.
+- **v6.5 / A4 Production Eval / Observability** — layered Run traces, success/latency/cost/token summaries, per-layer Run failure rates, normalized failure clustering, baseline-vs-current regression diagnosis and explicit separation between operational telemetry and quality evaluation.
 
 ## Run teaching profile
 
@@ -27,9 +28,7 @@ pip install -e ".[browser]"
 playwright install chromium
 ```
 
-The tests do not require a network or browser binary; they use `FixtureBrowser` while exercising the same `BrowserAdapter` boundary.
-
-## A2 runtime architecture
+## A2 Tool Runtime boundary
 
 ```text
 Agent / LangGraph
@@ -48,7 +47,7 @@ run-scoped files / processes / deliverables
 
 The runtime adds useful guardrails—workspace path checks, `shell=False`, command allowlists, minimal environments, timeouts and bounded output—but it is deliberately **not** called a security sandbox. Strong isolation still belongs to OS/container/VM controls.
 
-## A3 trust and authority model
+## A3 Trust and authority boundary
 
 Prompt injection is treated as an authority-confusion problem rather than a string-filtering problem.
 
@@ -56,8 +55,7 @@ Prompt injection is treated as an authority-confusion problem rather than a stri
 Browser / RAG / file / tool output
         │
         ▼
-ContextChunk
-trust = external_untrusted
+ContextChunk(trust=external_untrusted)
         │
         ▼
 LLM proposes ToolIntent
@@ -74,68 +72,100 @@ AgentSecurityPolicy
 ALLOW | DENY | APPROVAL_REQUIRED
 ```
 
-`ContentTrust` and `RunAuthority` are deliberately separate. Untrusted text can influence model reasoning, but it cannot expand product permissions.
+Untrusted text can influence model reasoning, but it cannot expand product permissions. `READ_SECRET` stays host-only, `NETWORK_FETCH` and `NETWORK_SEND` are separate capabilities, and approval is bound to an immutable exact action snapshot plus an authorized approver.
 
-Current capability examples:
+## A4 Production observability boundary
 
-```text
-READ_WORKSPACE
-WRITE_WORKSPACE
-RUN_PYTHON
-RUN_SHELL
-NETWORK_FETCH
-NETWORK_SEND
-READ_SECRET
-```
-
-Important rules:
-
-- `READ_SECRET` is always denied as a model-readable capability. Raw credentials stay in the Host/connector and should be injected only into the downstream trusted integration that needs them.
-- `NETWORK_FETCH` and `NETWORK_SEND` are separate capabilities. Being able to read a paper does not imply permission to upload arbitrary data.
-- Network targets must be inside `RunAuthority.allowed_egress_hosts`.
-- Sensitive actions proposed while external untrusted content is in context can require human approval.
-- `ApprovalGrant` is bound to the exact `ToolIntent.fingerprint()`. Approving one Python action cannot be replayed as approval for a later network send or different command.
-- A prompt-injection detector is only a telemetry/risk signal. `injection_signal()` intentionally has false negatives; security correctness must not depend on detector recall.
-
-## A3 adversarial regression tests
-
-`tests/test_agent_security.py` covers:
+A final success score is not enough to debug an Agent. `production_observability.py` models one Run as layered operational spans:
 
 ```text
-malicious browser text → trust = external_untrusted
-raw secret read        → DENY
-send to evil host      → DENY by egress scope
-tainted Python/Shell   → APPROVAL_REQUIRED
-wrong approval token   → DENY
-exact approval         → ALLOW
-missing run capability → DENY
-fetch-only authority   → cannot become NETWORK_SEND
-paraphrased injection  → detector can miss it, policy still holds
+RunTrace
+├── agent
+├── model
+├── retrieval
+├── tool
+├── runtime
+├── retry
+└── handoff
 ```
 
-The tests are intentionally provider-free. They test the security boundary even if a future model sometimes resists prompt injection by itself.
+Each `RunSpan` carries compact operational attributes such as duration, status, error type, model/tool name, token counts and cost. The teaching model intentionally does **not** make raw prompts, completions, retrieved documents or tool payloads part of the default trace contract; those may contain PII, secrets, customer data or prompt-injection content and should be opt-in/redacted telemetry.
+
+`ProductionRunAnalyzer.summarize()` produces:
+
+```text
+success_rate
+average_latency_ms
+average_cost_usd
+average_tokens
+layer_failure_rates
+failure_clusters
+average_quality_score
+```
+
+Layer failure rates count affected **Runs**, not the number of error spans. A Run that retries the same broken tool five times still represents one affected Run for the layer-rate metric.
+
+`ProductionRunAnalyzer.diagnose(baseline, current)` compares two traffic/eval batches and reports:
+
+```text
+success delta
+latency ratio
+cost ratio
+quality delta
+per-layer failure deltas
+top normalized failure clusters
+suspected regression layers
+```
+
+The deterministic A4 fixture intentionally reproduces:
+
+```text
+baseline success = 92%
+current success  = 78%
+```
+
+with the additional failures concentrated in `tool:search_timeout`. The correct diagnosis is therefore a Tool-layer regression (plus latency/quality consequences), not merely “success dropped 14 percentage points.”
+
+## Trace health is not quality health
+
+Operational telemetry and quality evaluation remain separate:
+
+```text
+Metrics
+  when/how much did the system change?
+
+Trace
+  where in one Run did execution change/fail?
+
+Eval
+  was the answer/evidence/trajectory actually good?
+
+Audit
+  who authorized or performed a sensitive action?
+```
+
+All model/tool calls can return 200 while retrieval evidence or answer quality degrades. A4 therefore keeps golden regression tests, sampled online evaluation, human labels and calibrated judge scores conceptually separate from tracing.
 
 ## Current structure
 
 ```text
 app/
+├── production_observability.py   # A4 traces / summaries / regression diagnosis
 ├── agent_security.py             # A3 trust / capability / approval policy
 ├── tool_runtime.py               # A2 browser/filesystem/shell/python/artifacts
 ├── mcp_contracts.py              # A1 primitive/control ownership policy
 ├── mcp_research_server.py        # A1 MCPServer + research capabilities
 ├── fastapi_app.py                # HTTP product API / health / SSE / commands
 ├── fastapi_service.py            # v6 composition root / deployment audit
-├── fastapi_security.py           # Bearer / Principal / permissions
-├── fastapi_errors.py             # ProblemDetails / request correlation
 ├── fastapi_worker.py             # separate Worker adapter
 ├── langgraph_production.py       # control-plane ↔ LangGraph bridge
 └── production.py                 # tenant RunStore / Queue / optimistic revisions
 
 tests/
+├── test_production_observability.py
 ├── test_agent_security.py
 ├── test_tool_runtime.py
 ├── test_mcp_primitives.py
-├── test_fastapi_lifecycle_production.py
 └── ...
 ```
 
@@ -147,8 +177,9 @@ tests/
 - MCP standardizes capability interoperability, not capability permission.
 - Tool Runtime owns execution mechanics; a stronger sandbox owns hostile-code containment.
 - Security policy owns authority decisions outside the model; trust labels do not sanitize content.
-- Artifact files stay outside model context unless explicitly summarized/read back in.
+- Observability records execution signals; it does not define quality truth or authorization policy.
+- Artifact files and sensitive model/tool payloads stay outside telemetry/context unless explicitly needed and safely handled.
 
 ## Next step
 
-**A4 — Production Eval / Observability.** Start from a real operational failure: Agent success rate falls from 92% to 78%. Connect Run → model/retrieval/tool/retry/runtime events, latency/token/cost metrics, regression sets and failure clustering so the team can identify which layer actually regressed instead of guessing from final answers.
+**A5 — Distributed / Long-running Agent Runtime.** Turn the existing durable concepts into a real multi-worker topology: at-least-once delivery, leases/heartbeats, stale-worker rejection, retry/backpressure/rate limits, checkpoint recovery, graceful drain and external side-effect idempotency.
