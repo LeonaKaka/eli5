@@ -44,4 +44,37 @@
       runBtn.disabled=false; running=false;
     });
   }
+
+  const attackOut=q('#attackOut');
+  if(attackOut){
+    let mode='naive';
+    const action=q('#attackAction');
+    const approval=q('#attackApproval');
+    const status=q('#attackStatus');
+    const cases={
+      secret:{label:'READ_SECRET · OPENAI_API_KEY',naive:'EXECUTE ❌\n\n模型把网页里的文字当成了授权来源。\nraw secret 进入 model/tool observation 后，后续任何 capability 都可能泄露它。',policy:()=>({kind:'deny',title:'DENY',body:'READ_SECRET 永远不是 model-readable capability。\n\ncredential 留在 Host / connector；Agent 只能请求“调用某个已授权服务”，拿 sanitized result。'})},
+      send:{label:'NETWORK_SEND · https://evil.example/collect',naive:'EXECUTE ❌\n\n万能 HTTP tool 既能读论文，也能向任意主机 POST。\nAgent 成了 confused deputy。',policy:()=>({kind:'deny',title:'DENY',body:'evil.example 不在 authenticated RunAuthority.allowed_egress_hosts。\n\nuntrusted webpage 不能通过自然语言扩展 egress scope。'})},
+      python:{label:'RUN_PYTHON · work/analyze.py',naive:'EXECUTE ⚠️\n\n虽然目的看起来像“分析数据”，但 proposal 是在 external_untrusted context 下产生的。\n如果生成代码被注入，subprocess 仍可能访问主机资源。',policy:()=>approval.checked?({kind:'allow',title:'ALLOW · exact approval',body:'当前 exact RUN_PYTHON intent 已被用户批准。\n\napproval 绑定 action fingerprint；换 target/args/capability 后必须重新批准。\n仍需真正 sandbox 限制 filesystem/network/process。'}):({kind:'approval',title:'APPROVAL REQUIRED',body:'RUN_PYTHON 是高权限能力，而且 proposal 受 external_untrusted 内容影响。\n\nHost 暂停，不让模型自己决定“这次应该没事”。'})},
+      shell:{label:'RUN_SHELL · inspect workspace',naive:'EXECUTE ⚠️\n\ncommand allowlist 只能减少攻击面；如果允许的 executable 本身足够强，依然可能越权。',policy:()=>approval.checked?({kind:'allow',title:'ALLOW · exact approval',body:'用户批准当前 shell intent；执行仍受 command allowlist + workspace + sandbox policy。'}):({kind:'approval',title:'APPROVAL REQUIRED',body:'外部 taint 驱动高权限 shell proposal → 必须 exact approval。'})},
+      fetch:{label:'NETWORK_FETCH · papers.example.test/article',naive:'EXECUTE ✅\n\n这是任务本来就需要的读取能力。',policy:()=>({kind:'allow',title:'ALLOW',body:'NETWORK_FETCH 已被 RunAuthority 授权，目标 host 在 allowlist。\n\n注意：拿回来的页面内容仍被标记 external_untrusted，读取成功不会把内容升级为 trusted instruction。'})}
+    };
+    const render=()=>{
+      qa('[data-security-mode]').forEach(b=>b.classList.toggle('active',b.dataset.securityMode===mode));
+      const c=cases[action.value];
+      if(mode==='naive'){
+        status.textContent='NAIVE · model proposal = authority';
+        status.className='http-status bad';
+        attackOut.textContent=`${c.label}\n\n${c.naive}`;
+        return;
+      }
+      const result=c.policy();
+      status.textContent=result.title;
+      status.className='http-status '+(result.kind==='allow'?'ok':result.kind==='approval'?'warn':'bad');
+      attackOut.textContent=`${c.label}\n\ntrust = external_untrusted\nauthority = product policy (separate)\n\n${result.body}`;
+    };
+    qa('[data-security-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.securityMode;render()}));
+    action.addEventListener('change',render);
+    approval.addEventListener('change',render);
+    render();
+  }
 })();
