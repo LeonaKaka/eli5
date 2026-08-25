@@ -1,0 +1,57 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A5 · Distributed / Long-running Runtime</title><link rel="stylesheet" href="../assets/styles.css"><link rel="stylesheet" href="../assets/advanced.css"></head><body><div class="site"><aside class="sidebar"><div class="brand">ELI5 ADV<small>Advanced Agent Engineering</small></div><div class="nav-label">6 High-density Chapters</div><nav class="nav"></nav><div class="progress-box"></div></aside><main class="content"><section class="hero"><span class="kicker">A5 · Research Assistant v6.6</span><h1>一个 Worker 跑得稳，<br>不代表十个 Worker 不会互相踩死。</h1><p class="lead">工程问题：Agent 任务可能跑几十分钟甚至几小时。Worker 会重启、网络会抖、Queue 会重复投递、旧进程会在 lease 过期后突然醒来。A5 把前面的 durable 概念真正拼成 <b>at-least-once Queue + lease/heartbeat + fencing + checkpoint recovery + backpressure</b>。</p></section><section class="section"><div class="section-head"><div class="section-index">1</div><div><h2>分布式系统里，“拿到 Job”不等于“拥有 Run”</h2></div></div><div class="flow"><div class="node">Queue Delivery</div><span class="arrow">→</span><div class="node">Worker claim</div><span class="arrow">→</span><div class="node">Lease</div><span class="arrow">+</span><div class="node">Fencing Token</div></div><p>很多 Queue 都是 <b>at-least-once delivery</b>：消息可能重复出现。真正的 ownership 不能靠“我 pop 到了这条消息”，而要靠共享控制面里的 claim/lease。</p><div class="callout warn"><b>Queue delivery 是建议你尝试工作；Lease 才是当前所有权。</b>这两个概念混在一起，重复投递时就会出现两个 Worker 同时执行同一个 Agent。</div></section><section class="section"><div class="section-head"><div class="section-index">2</div><div><h2>为什么 heartbeat 还不够？Zombie Worker。</h2></div></div><pre>t=0    Worker A claim
+       lease expires at t=30
+       fence = 41
+
+t=20   A 网络卡住 / GC pause / process freeze
+
+t=31   watchdog: lease expired
+       requeue
+
+t=32   Worker B claim
+       fence = 42
+
+t=33   Worker A 突然恢复
+       还以为自己是 owner</pre><p>旧 Worker 不一定会主动收到“你已经失去所有权”。所以每次重要写入还要携带一个单调递增的 <b>fencing token</b>。共享下游看到 41 &lt; 42，就拒绝旧 Worker。</p></section><section class="section"><div class="section-head"><div class="section-index">3</div><div><h2>Interactive · Lease Takeover Lab</h2><div class="sub">按顺序推进事故，观察 ownership、queue、checkpoint 和 fence 怎么变化。</div></div></div><div class="lease-console"><div class="lease-controls"><button class="btn primary" id="leaseNext">推进一步</button><button class="btn" id="leaseReset">重置</button><div id="leaseStage" class="http-status ok">READY</div><div class="lease-cards"><div><b>Run</b><span id="leaseRun">queued</span></div><div><b>Owner</b><span id="leaseOwner">—</span></div><div><b>Fence</b><span id="leaseFence">—</span></div><div><b>Checkpoint</b><span id="leaseCheckpoint">—</span></div></div></div><div><b>Timeline</b><div id="leaseTimeline" class="distributed-timeline"></div><b>系统解释</b><pre id="leaseOut">点击“推进一步”。</pre></div></div></section><section class="section"><div class="section-head"><div class="section-index">4</div><div><h2>Checkpoint 解决“从哪继续”，Lease 解决“谁能继续”</h2></div></div><div class="control-table"><div class="head">机制</div><div class="head">回答的问题</div><div class="head">不能替代</div><div class="head">典型字段</div><div><b>Queue</b></div><div>哪项工作等待被消费？</div><div>Run ownership</div><div>delivery / attempt</div><div><b>Lease</b></div><div>现在谁拥有执行权？</div><div>业务 checkpoint</div><div>worker / expires_at</div><div><b>Fencing</b></div><div>旧 owner 还能不能写？</div><div>外部 API 幂等性</div><div>monotonic token</div><div><b>Checkpoint</b></div><div>恢复时从哪里继续？</div><div>Queue / auth</div><div>checkpoint_id</div></div><p>恢复路径必须同时拿到“最新 checkpoint”和“新的执行所有权”。只有 checkpoint 没有 fencing，旧 Worker 仍可能和恢复 Worker 同时写。</p></section><section class="section"><div class="section-head"><div class="section-index">5</div><div><h2>重复投递：不要追求魔法 exactly-once</h2></div></div><pre>Queue delivers job #17
+→ Worker A claim succeeds
+
+Queue redelivers same logical attempt
+→ Worker B receives duplicate
+→ claim sees active lease / stale attempt
+→ reject</pre><p>Queue 可以重复；真正重要的是 <b>重复 delivery 不产生第二个 owner</b>。这比把所有希望压在 Queue 的“恰好一次”语义上稳得多。</p><div class="callout"><b>End-to-end exactly-once 通常不是一个 Queue 配置能给你的。</b>Run claim、checkpoint、external side effect、数据库 commit 都有各自失败窗口。</div></section><section class="section"><div class="section-head"><div class="section-index">6</div><div><h2>External side effect：fence + idempotency，仍然不覆盖所有世界</h2></div></div><div class="sandbox-split"><div class="sandbox-box good"><b>支持 fencing 的共享下游</b><pre>write(
+  resource="report:42",
+  fence=42,
+  idempotency_key="publish-42"
+)
+
+late worker fence=41
+→ rejected</pre></div><div class="sandbox-box bad"><b>普通外部 API</b><pre>POST /send-email
+POST /place-order
+POST /publish
+
+可能根本不认识 fence</pre></div></div><p>所以 A5 的 `FencedEffectLedger` 只是演示“支持 fencing 的 downstream”应该怎么做。对于普通外部 API，仍然要用前面 DurableAction 的规则：</p><pre>SAFE / EXTERNAL_IDEMPOTENT
+→ retry allowed
+
+NON_IDEMPOTENT + outcome ambiguous
+→ reconcile
+→ 不 blind replay</pre></section><section class="section"><div class="section-head"><div class="section-index">7</div><div><h2>Backpressure：系统满了时，正确动作可能是“别收了”</h2></div></div><div class="backpressure-lab"><div><label>Queue depth <input id="bpQueue" type="range" min="0" max="140" value="35"></label><label>Tenant inflight <input id="bpTenant" type="range" min="0" max="16" value="3"></label><div class="lease-cards"><div><b>Queue</b><span id="bpQueueVal">35 / 100</span></div><div><b>Tenant</b><span id="bpTenantVal">3 / 10</span></div></div></div><div><div id="bpStatus" class="http-status ok">ACCEPT</div><pre id="bpOut"></pre></div></div><p>没有 admission control 时，最容易出现的不是“任务都排着慢慢做”，而是 queue wait、内存、数据库连接、下游 rate limit 一起崩。入口应该能返回明确的 overload/retry signal。</p></section><section class="section"><div class="section-head"><div class="section-index">8</div><div><h2>Graceful drain：升级 Worker 不能直接 SIGKILL 一切</h2></div></div><pre>worker-a mode = DRAINING
+
+已有 lease:
+  heartbeat ✅
+  checkpoint ✅
+  finish ✅
+
+新 delivery:
+  claim ❌</pre><p>这样 rolling deploy 时，Worker 先停止接新 Run，让当前工作结束或安全 checkpoint，再退出。如果超时还没结束，再由 lease expiry + recovery 接管。</p></section><section class="section"><div class="section-head"><div class="section-index">9</div><div><h2>v6.6 真实代码边界</h2></div></div><pre>DistributedRunCoordinator
+├── submit / admission control
+├── at-least-once QueueDelivery
+├── claim → LeaseGrant + fencing token
+├── heartbeat
+├── checkpoint
+├── reap_expired → recovery delivery
+├── complete
+└── worker draining
+
+FencedEffectLedger
+├── monotonic fence
+├── idempotency key replay
+└── stale worker rejection</pre><p>它没有替换前面的 `ProductionControlPlane` 和 LangGraph；A5 是把“真实多 Worker 环境里缺的 ownership 层”单独讲透。最终 Capstone 再决定哪些职责落在 Postgres、Redis、Queue service、workflow engine 或其他基础设施。</p></section><section class="section"><div class="section-head"><div class="section-index">10</div><div><h2>面试 / System Design 验收</h2></div></div><div class="quiz" data-quiz><h4>Worker A 的 lease 已过期，Worker B 已拿到更高 fencing token。A 此时恢复运行，最关键的防线是什么？</h4><button class="option" data-feedback="旧 Worker 可能根本不知道 Queue 已经重投。">A. 依赖 Queue 不再给 A 发消息</button><button class="option" data-feedback="heartbeat 只能维持有效 lease，不能通知一个冻结后醒来的 zombie。">B. 让 A 自己记得 heartbeat 超时</button><button class="option" data-correct="1">C. 共享状态/支持的 downstream 写入校验 fencing token；旧 token 被拒绝</button><div class="feedback"></div></div><div class="callout interview"><b>能讲清这几题：</b>① at-least-once Queue 为什么要求 idempotent claim？② lease 和 fencing token 的区别？③ heartbeat 解决什么、解决不了什么？④ checkpoint 为什么不能代表 ownership？⑤ stale worker 如何被拒绝？⑥ 外部 API 不支持 fencing 怎么办？⑦ 为什么 backpressure 应发生在入口？⑧ graceful drain 怎么和 lease recovery 配合？⑨ 为什么不要轻易声称 exactly-once？</div></section><div class="footer">A5 完成 · Research Assistant v6.6。下一章也是最后一章 A6：把 API、RunStore、Queue、Worker、LangGraph、MCP、Sandbox、Security、Observability 全部做成一场 System Design Capstone。</div></main></div><script src="../assets/app.js"></script><script src="../assets/advanced-nav.js"></script><script src="../assets/advanced.js"></script></body></html>
