@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from app.tool_runtime import (
     BrowserDocument,
     BrowserPolicy,
     FixtureBrowser,
+    ShellPolicy,
     ShellRunner,
     ToolPolicyError,
     run_research_artifact_demo,
@@ -31,18 +33,21 @@ def test_v63_workspace_rejects_absolute_and_parent_escape(tmp_path: Path) -> Non
 
 def test_v63_shell_runner_uses_allowlist_and_workspace_path_policy(tmp_path: Path) -> None:
     workspace = AgentWorkspace(tmp_path / "run")
-    workspace.write_text("inputs/data.txt", "one two three\n")
-    shell = ShellRunner(workspace)
+    python_name = Path(sys.executable).name
+    shell = ShellRunner(
+        workspace,
+        policy=ShellPolicy(allowed_commands=frozenset({python_name})),
+    )
 
-    result = shell.run(["wc", "-w", "inputs/data.txt"])
+    result = shell.run([sys.executable, "-c", "print('allowed command')"])
     assert result.returncode == 0
-    assert "3" in result.stdout
+    assert "allowed command" in result.stdout
 
     with pytest.raises(ToolPolicyError, match="command is not allowed"):
-        shell.run(["bash", "-lc", "echo unsafe"])
+        shell.run(["definitely-not-allowed", "argument"])
 
     with pytest.raises(ToolPolicyError, match="escapes workspace policy"):
-        shell.run(["cat", "/etc/passwd"])
+        shell.run([sys.executable, "/outside/script.py"])
 
 
 def test_v63_browser_policy_can_limit_hosts() -> None:
