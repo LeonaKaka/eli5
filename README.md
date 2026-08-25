@@ -13,16 +13,16 @@ Public static learning site for AI Agent engineering, built as an interactive EL
 
 The core line contains 58 lessons. Roadmaps remain under `docs/`.
 
-## Advanced Agent Engineering — 4/6 live
+## Advanced Agent Engineering — 5/6 live
 
 Advanced material is deliberately compressed into six high-density chapters. Details that can be looked up in framework docs do not become separate lessons.
 
-- **A1 MCP / External Capability Ecosystem ✅** — Host/Client/Server, Tool/Resource/Prompt control ownership, real Python SDK v2 `MCPServer` + `Client`. Transport/OAuth/protocol minutiae are lookup material.
-- **A2 Browser / Shell / Python / Filesystem Runtime ✅** — run-scoped workspace, real-browser adapter boundary, constrained shell, separate Python process, artifact registry, complete browser → source → generated code → artifact flow.
-- **A3 Agent Security / Prompt Injection ✅** — trust vs authority, indirect prompt injection, secret isolation, fetch/send capability separation, network egress scope, exact-action approval and adversarial regression tests.
-- **A4 Production Eval / Observability ✅** — layered Run traces, success/latency/cost/token metrics, per-layer failure rates, failure clustering, baseline-vs-current diagnosis and quality regression gates.
-- **A5 Distributed / Long-running Agent Runtime** — leases, heartbeat, duplicate delivery, stale workers, backpressure, recovery and side-effect idempotency.
-- **A6 Agent System Design Capstone** — design and defend a long-running multi-tenant Deep Research Agent architecture.
+- **A1 MCP / External Capability Ecosystem ✅** — Host/Client/Server, Tool/Resource/Prompt control ownership, real Python SDK v2 `MCPServer` + `Client`.
+- **A2 Browser / Shell / Python / Filesystem Runtime ✅** — run-scoped workspace, browser boundary, constrained shell, separate Python process, artifact lifecycle.
+- **A3 Agent Security / Prompt Injection ✅** — trust vs authority, indirect prompt injection, secret isolation, fetch/send scope, exact-action approval.
+- **A4 Production Eval / Observability ✅** — layered traces, success/latency/cost metrics, quality eval, failure clustering and regression diagnosis.
+- **A5 Distributed / Long-running Agent Runtime ✅** — at-least-once delivery, leases/heartbeats, fencing, stale-worker rejection, checkpoint recovery, backpressure and graceful drain.
+- **A6 Agent System Design Capstone** — final design and failure review of a long-running multi-tenant Deep Research Agent.
 
 Full scope: `docs/advanced-agent-roadmap.md`.
 
@@ -31,7 +31,7 @@ Every chapter begins with a concrete engineering problem and includes an explora
 
 ## Runnable project
 
-`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent at v4.0, LangGraph at v5.0, FastAPI at v6.0, A1 MCP at v6.2, A2 Tool Runtime at v6.3, A3 Security at v6.4, and A4 Production Eval / Observability now brings it to **Research Assistant v6.5**.
+`projects/research-agent-lite/` is the same project across all tracks. Python closed at v1.0, LLM at v2.0, RAG at v3.0, Agent at v4.0, LangGraph at v5.0, FastAPI at v6.0, and Advanced A1–A5 now bring it to **Research Assistant v6.6**.
 
 ```bash
 cd projects/research-agent-lite
@@ -49,7 +49,7 @@ pip install -e ".[browser]"
 playwright install chromium
 ```
 
-Docker, Postgres, Redis, browser runtimes and observability stacks are used when later chapters need them; they are not standalone syllabus tracks.
+Docker, Postgres, Redis, browser runtimes and observability stacks appear only when an engineering problem needs them; they are not standalone syllabus tracks.
 
 ## Pages
 Deployed with GitHub Actions from the repository root. The static learning UI requires no backend or secret.
